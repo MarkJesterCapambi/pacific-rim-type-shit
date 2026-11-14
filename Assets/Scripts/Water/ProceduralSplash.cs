@@ -16,6 +16,7 @@ namespace PacificRimWater
 
         public static void CreateFoamRing(Vector3 position, float radius, float duration = 1.4f)
         {
+            if (float.IsNaN(position.x) || float.IsNaN(position.y) || float.IsNaN(position.z)) return;
             GameObject obj = new GameObject("ProceduralOceanFoamRing");
             obj.transform.position = position + Vector3.up * 0.05f;
 

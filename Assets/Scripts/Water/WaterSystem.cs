@@ -3,9 +3,9 @@ using UnityEngine;
 namespace PacificRimWater
 {
     /// <summary>
-    /// Pacific Rim Ocean Wave System.
-    /// Combines deep oceanic Gerstner swells with a real-time 2D wave equation heightfield
-    /// for massive tidal ripples, footstep shockwaves, and plowing wakes from giant mechs.
+    /// Zero-lag Pacific Rim Ocean Wave System.
+    /// Synchronizes analytical 3-band Gerstner swells and a fixed 8-slot propagating wake ring
+    /// buffer directly to the GPU shader while providing matching analytical CPU water height queries.
     /// </summary>
     [ExecuteAlways]
     public class WaterSystem : MonoBehaviour
@@ -14,64 +14,121 @@ namespace PacificRimWater
 
         [Header("Ocean Swells (Gerstner Waves)")]
         [Tooltip("Dominant ocean wave amplitude (crest height).")]
-        [Range(0.1f, 3.0f)]
-        public float swellAmplitude1 = 0.85f;
+        [Range(0.05f, 3.0f)]
+        public float swellAmplitude1 = 1.0f;
         [Tooltip("Dominant ocean wavelength in meters.")]
         [Range(10f, 150f)]
-        public float swellWavelength1 = 36f;
+        public float swellWavelength1 = 52f;
         [Tooltip("Speed of dominant ocean swells.")]
         [Range(0.2f, 5.0f)]
-        public float swellSpeed1 = 1.4f;
-        public Vector2 swellDirection1 = new Vector2(1f, 0.25f);
+        public float swellSpeed1 = 1.30f;
+        public Vector2 swellDirection1 = new Vector2(1f, 0.32f);
         [Range(0f, 1f)]
         [Tooltip("Steepness of wave crests (0 = sine wave, 1 = sharp crest).")]
-        public float swellSteepness1 = 0.5f;
+        public float swellSteepness1 = 0.34f;
 
         [Header("Secondary Cross Swell")]
         [Range(0f, 2.0f)]
-        public float swellAmplitude2 = 0.45f;
+        public float swellAmplitude2 = 0.50f;
         [Range(5f, 80f)]
-        public float swellWavelength2 = 18f;
+        public float swellWavelength2 = 31f;
         [Range(0.2f, 5.0f)]
-        public float swellSpeed2 = 1.8f;
-        public Vector2 swellDirection2 = new Vector2(0.3f, 1f);
+        public float swellSpeed2 = 1.50f;
+        public Vector2 swellDirection2 = new Vector2(0.58f, 0.82f);
         [Range(0f, 1f)]
-        public float swellSteepness2 = 0.4f;
+        public float swellSteepness2 = 0.28f;
+
+        [Header("Tertiary Swell")]
+        [Range(0f, 1.5f)]
+        public float swellAmplitude3 = 0.30f;
+        [Range(3f, 50f)]
+        public float swellWavelength3 = 16f;
+        [Range(0.2f, 5.0f)]
+        public float swellSpeed3 = 1.80f;
+        public Vector2 swellDirection3 = new Vector2(-0.78f, 0.62f);
+        [Range(0f, 1f)]
+        public float swellSteepness3 = 0.22f;
 
         [Header("Fine Wind Chop")]
-        [Range(0f, 0.5f)]
-        public float chopAmplitude = 0.15f;
+        [Range(0f, 0.3f)]
+        public float chopAmplitude = 0.06f;
         [Range(1f, 20f)]
-        public float chopWavelength = 6f;
+        public float chopWavelength = 6.0f;
         [Range(0.5f, 6.0f)]
-        public float chopSpeed = 2.5f;
+        public float chopSpeed = 2.3f;
 
-        [Header("Interactive Wave Simulation (2D Wave Equation)")]
-        [Tooltip("Grid resolution for real-time interactive footstep waves.")]
+        [Header("Rogue Wave Sets")]
+        [Tooltip("Extra primary-swell amplitude multiplier at the peak of a rare wave set (0 = uniform swells).")]
+        [Range(0f, 5f)]
+        public float waveSetBoost = 3.10f;
+        [Tooltip("Spatial length of one wave-set envelope along the primary swell direction (meters).")]
+        [Range(60f, 600f)]
+        public float waveSetWavelength = 230f;
+        [Tooltip("Travel speed (m/s) of wave sets along the primary swell direction.")]
+        [Range(0f, 20f)]
+        public float waveSetSpeed = 7f;
+
+        [Header("Wave Height Limits")]
+        [Tooltip("Soft vertical ceiling for subtle dynamic footstep and leg wakes (meters).")]
+        [Range(0.05f, 1.5f)]
+        public float maxRippleHeight = 0.22f;
+        [Tooltip("Soft vertical ceiling for total wave displacement above mean ocean level (meters).")]
+        [Range(0.25f, 12.0f)]
+        public float maxTotalWaveHeight = 6.60f;
+        [Tooltip("Soft vertical floor for wave troughs below mean ocean level (meters) so lowest point stays at knee level.")]
+        [Range(0.5f, 5.0f)]
+        public float maxTroughDepth = 2.25f;
+
+        /// <summary>Mean (undisturbed) ocean surface Y.</summary>
+        public float MeanSurfaceY => transform.position.y;
+
+        /// <summary>Horizontal travel direction of the primary swell.</summary>
+        public Vector2 DominantWaveDirection => swellDirection1.sqrMagnitude > 0.001f ? swellDirection1.normalized : Vector2.right;
+
+        /// <summary>Phase speed (m/s) of the primary swell.</summary>
+        public float DominantPhaseSpeed
+        {
+            get
+            {
+                float k = 2f * Mathf.PI / Mathf.Max(1f, swellWavelength1);
+                return Mathf.Sqrt(9.81f / k) * swellSpeed1;
+            }
+        }
+
+        [Header("Wake Propagation Settings")]
+        [Tooltip("Legacy grid settings retained for inspector compatibility (waves now evaluate analytically on GPU).")]
         [Range(32, 160)]
-        public int simResolution = 96;
-        [Tooltip("Physical dimension (meters) of the interactive wave simulation zone.")]
-        public float simAreaSize = 80f;
-        [Tooltip("Speed at which footstep ripples propagate across the ocean surface.")]
-        [Range(0.1f, 0.45f)]
-        public float waveSpeed = 0.32f;
-        [Tooltip("Damping factor for ripples (closer to 1.0 = ripples travel further).")]
+        public int simResolution = 112;
+        public float simAreaSize = 110f;
+        [Range(0.05f, 0.38f)]
+        public float waveSpeed = 0.26f;
         [Range(0.92f, 0.998f)]
-        public float waveDamping = 0.985f;
-        [Tooltip("Dampen waves at borders of the simulation zone.")]
+        public float waveDamping = 0.982f;
         public bool absorbEdges = true;
 
+        [Tooltip("Radial expansion speed (m/s) of analytical wake rings.")]
+        public float wakeExpansionSpeed = 5.5f;
+        [Tooltip("Duration (seconds) before a wake ring fades completely.")]
+        public float wakeLifetime = 3.2f;
+
         [Header("Simulation Follows Target")]
-        [Tooltip("Optional transform (e.g. Jaeger) that the interactive wave grid follows in the world.")]
         public Transform followTarget;
 
-        // Wave simulation heightfield buffers
-        private float[,] currentHeights;
-        private float[,] previousHeights;
-        private Vector3 simCenter;
-        private float cellSpacing;
-        private float simStepAccumulator;
-        private const float FIXED_SIM_DT = 0.02f;
+        private const int MAX_WAKES = 8;
+        private readonly Vector4[] wakePositions = new Vector4[MAX_WAKES]; // xyz = worldPos, w = startTime
+        private readonly Vector4[] wakeParams = new Vector4[MAX_WAKES];    // x = radius, y = strength, z = speed, w = invLifetime
+        private int wakeCursor;
+
+        // Cached Shader Property IDs (zero GC allocation per frame)
+        private static readonly int IdSwell1 = Shader.PropertyToID("_OceanSwell1");
+        private static readonly int IdSwell1Dir = Shader.PropertyToID("_OceanSwell1Dir");
+        private static readonly int IdSwell2 = Shader.PropertyToID("_OceanSwell2");
+        private static readonly int IdSwell2Dir = Shader.PropertyToID("_OceanSwell2Dir");
+        private static readonly int IdSwell3 = Shader.PropertyToID("_OceanSwell3");
+        private static readonly int IdSwell3Dir = Shader.PropertyToID("_OceanSwell3Dir");
+        private static readonly int IdHeightLimits = Shader.PropertyToID("_OceanHeightLimits");
+        private static readonly int IdWakePositions = Shader.PropertyToID("_OceanWakePositions");
+        private static readonly int IdWakeParams = Shader.PropertyToID("_OceanWakeParams");
 
         void OnEnable()
         {
@@ -79,6 +136,7 @@ namespace PacificRimWater
                 Instance = this;
 
             InitializeSimulation();
+            PushShaderGlobals(Application.isPlaying ? Time.time : 0f);
         }
 
         void OnDisable()
@@ -95,209 +153,233 @@ namespace PacificRimWater
             InitializeSimulation();
         }
 
+        public static float SoftLimit(float value, float limit)
+        {
+            if (limit <= 0.001f) return 0f;
+            if (float.IsNaN(value) || float.IsInfinity(value)) return 0f;
+            float scaled = value / limit;
+            float soft = (float)System.Math.Tanh(scaled) * limit;
+            return Mathf.Clamp(soft, -limit, limit);
+        }
+
         public void InitializeSimulation()
         {
-            simResolution = Mathf.Clamp(simResolution, 32, 160);
-            currentHeights = new float[simResolution, simResolution];
-            previousHeights = new float[simResolution, simResolution];
-            cellSpacing = simAreaSize / (simResolution - 1);
-            simCenter = followTarget != null ? followTarget.position : transform.position;
-            simCenter.y = transform.position.y;
+            for (int i = 0; i < MAX_WAKES; i++)
+            {
+                wakePositions[i] = new Vector4(0f, 0f, 0f, -100f);
+                wakeParams[i] = Vector4.zero;
+            }
+            wakeCursor = 0;
         }
 
         void Update()
         {
-            if (currentHeights == null || currentHeights.GetLength(0) != simResolution)
-            {
-                InitializeSimulation();
-            }
-
-            // Follow target in world space (snapped to cell spacing to prevent vertex shimmering)
-            if (followTarget != null)
-            {
-                Vector3 targetPos = followTarget.position;
-                float snappedX = Mathf.Round(targetPos.x / cellSpacing) * cellSpacing;
-                float snappedZ = Mathf.Round(targetPos.z / cellSpacing) * cellSpacing;
-                simCenter = new Vector3(snappedX, transform.position.y, snappedZ);
-            }
-
-            float dt = Application.isPlaying ? Time.deltaTime : 0.02f;
-            simStepAccumulator += dt;
-
-            while (simStepAccumulator >= FIXED_SIM_DT)
-            {
-                StepWaveEquation();
-                simStepAccumulator -= FIXED_SIM_DT;
-            }
+            float currentTime = Application.isPlaying ? Time.time : 0f;
+            PushShaderGlobals(currentTime);
         }
 
-        /// <summary>
-        /// Solves discrete 2D Laplacian wave equation across the simulation heightfield.
-        /// </summary>
-        private void StepWaveEquation()
+        private void PushShaderGlobals(float currentTime)
         {
-            if (currentHeights == null || previousHeights == null) return;
+            Vector2 d1 = swellDirection1.sqrMagnitude > 0.001f ? swellDirection1.normalized : Vector2.right;
+            Vector2 d2 = swellDirection2.sqrMagnitude > 0.001f ? swellDirection2.normalized : Vector2.up;
+            Vector2 d3 = swellDirection3.sqrMagnitude > 0.001f ? swellDirection3.normalized : new Vector2(-0.78f, 0.62f).normalized;
 
-            float d = waveDamping;
+            Shader.SetGlobalVector(IdSwell1, new Vector4(swellAmplitude1, Mathf.Max(1f, swellWavelength1), swellSpeed1, swellSteepness1));
+            Shader.SetGlobalVector(IdSwell1Dir, new Vector4(d1.x, d1.y, chopAmplitude, Mathf.Max(0.5f, chopWavelength)));
 
-            for (int z = 1; z < simResolution - 1; z++)
-            {
-                for (int x = 1; x < simResolution - 1; x++)
-                {
-                    float current = currentHeights[x, z];
-                    float neighbors = currentHeights[x - 1, z]
-                                    + currentHeights[x + 1, z]
-                                    + currentHeights[x, z - 1]
-                                    + currentHeights[x, z + 1];
+            Shader.SetGlobalVector(IdSwell2, new Vector4(swellAmplitude2, Mathf.Max(1f, swellWavelength2), swellSpeed2, swellSteepness2));
+            Shader.SetGlobalVector(IdSwell2Dir, new Vector4(d2.x, d2.y, chopSpeed, waveSetSpeed));
 
-                    float newHeight = (neighbors * 0.5f - previousHeights[x, z]) * d;
-                    previousHeights[x, z] = current;
-                    currentHeights[x, z] = newHeight;
-                }
-            }
+            Shader.SetGlobalVector(IdSwell3, new Vector4(swellAmplitude3, Mathf.Max(1f, swellWavelength3), swellSpeed3, swellSteepness3));
+            Shader.SetGlobalVector(IdSwell3Dir, new Vector4(d3.x, d3.y, waveSetBoost, Mathf.Max(60f, waveSetWavelength)));
 
-            if (absorbEdges)
-            {
-                for (int i = 0; i < simResolution; i++)
-                {
-                    currentHeights[i, 0] *= 0.6f;
-                    currentHeights[i, simResolution - 1] *= 0.6f;
-                    currentHeights[0, i] *= 0.6f;
-                    currentHeights[simResolution - 1, i] *= 0.6f;
-                }
-            }
+            Shader.SetGlobalVector(IdHeightLimits, new Vector4(
+                Mathf.Max(0.05f, maxRippleHeight),
+                Mathf.Max(0.25f, maxTotalWaveHeight),
+                currentTime,
+                Mathf.Max(0.55f, maxTroughDepth)));
+
+            Shader.SetGlobalVectorArray(IdWakePositions, wakePositions);
+            Shader.SetGlobalVectorArray(IdWakeParams, wakeParams);
         }
 
-        #region Ocean Swell Mathematics (Gerstner Waves)
+        #region Ocean Swell Mathematics (8-Band Gerstner Spectrum, Spatial Phase Curl & Self-Rising Swells)
 
         /// <summary>
-        /// Computes oceanic swell displacement at world coordinate (X, Z) at time T.
+        /// Continuous 2D spatial turbulence warp that bends wave ridges organically,
+        /// breaking straight infinite lines and eradicating repeating cushion/diamond grid patterns.
+        /// </summary>
+        public static float EvaluateSpatialPhaseCurl(float worldX, float worldZ, float time)
+        {
+            return Mathf.Sin(0.026f * worldX + 0.038f * worldZ + 0.21f * time) * 1.55f
+                 + Mathf.Cos(0.034f * worldX - 0.029f * worldZ - 0.17f * time) * 1.25f
+                 + Mathf.Sin(0.052f * worldX + 0.018f * worldZ + 0.31f * time) * 0.70f;
+        }
+
+        /// <summary>
+        /// Dynamic 2D constructive wave packet envelope: localized swell groups stay mostly in
+        /// the normal knee-to-pelvis range (~85%) and rarely surge up to upper-torso height (~10-12%).
+        /// </summary>
+        public static float EvaluateSelfRisingMultiplier(float worldX, float worldZ, float time, float boost)
+        {
+            if (boost <= 0.001f) return 1f;
+
+            float p1 = Mathf.Sin(0.024f * (worldX * 0.91f + worldZ * 0.41f) - 0.42f * time);
+            float p2 = Mathf.Cos(0.017f * (-worldX * 0.48f + worldZ * 0.88f) - 0.31f * time + 1.6f);
+            float p3 = Mathf.Sin(0.011f * (worldX * 0.65f - worldZ * 0.76f) - 0.23f * time + 0.9f);
+            float group = Mathf.Clamp01(0.5f + 0.5f * (p1 * 0.55f + p2 * 0.30f + p3 * 0.15f));
+
+            float rogue = Mathf.Clamp01((group - 0.58f) / 0.42f);
+            float rareEnvelope = rogue * rogue * rogue * (rogue * (rogue * 6f - 15f) + 10f);
+            return Mathf.Lerp(0.75f, 1f + boost, rareEnvelope);
+        }
+
+        private static Vector3 EvaluateGerstnerComponent(
+            float amplitude,
+            float wavelength,
+            float speed,
+            Vector2 direction,
+            float steepness,
+            float warp,
+            float worldX,
+            float worldZ,
+            float time)
+        {
+            if (amplitude <= 0.0001f) return Vector3.zero;
+
+            Vector2 dir = direction.sqrMagnitude > 0.001f ? direction.normalized : Vector2.right;
+            float k = 2f * Mathf.PI / Mathf.Max(1f, wavelength);
+            float w = Mathf.Sqrt(9.81f * k) * speed;
+            float phase = k * (worldX * dir.x + worldZ * dir.y) - (w * time) + warp;
+
+            float sinP = Mathf.Sin(phase);
+            float cosP = Mathf.Cos(phase);
+
+            return new Vector3(
+                dir.x * (steepness * amplitude * cosP),
+                amplitude * sinP,
+                dir.y * (steepness * amplitude * cosP)
+            );
+        }
+
+        /// <summary>
+        /// Backward-compatible wrapper for legacy callers.
+        /// </summary>
+        public float EvaluateWaveSetMultiplier(float worldX, float worldZ, float time)
+        {
+            return EvaluateSelfRisingMultiplier(worldX, worldZ, time, waveSetBoost);
+        }
+
+        /// <summary>
+        /// Computes rich 8-band oceanic Gerstner wave spectrum with curl turbulence & self-rising swell groups.
         /// </summary>
         public Vector3 EvaluateOceanSwell(float worldX, float worldZ, float time)
         {
+            float warp = EvaluateSpatialPhaseCurl(worldX, worldZ, time);
+            float selfRise = EvaluateSelfRisingMultiplier(worldX, worldZ, time, waveSetBoost);
+            float steepScale = 1f / Mathf.Sqrt(Mathf.Max(1f, selfRise));
+
             Vector3 disp = Vector3.zero;
 
-            // Wave 1: Primary Swell
-            if (swellAmplitude1 > 0f)
+            // Wave 1: Heavy Deep Ground Swell (surges tall in rare rogue wave groups)
+            disp += EvaluateGerstnerComponent(swellAmplitude1 * selfRise, swellWavelength1, swellSpeed1,
+                swellDirection1, swellSteepness1 * steepScale, warp * 0.90f, worldX, worldZ, time);
+
+            // Wave 2: Storm Crest Swell (rises with rare rogue wave sets)
+            disp += EvaluateGerstnerComponent(swellAmplitude2 * selfRise * 0.85f, swellWavelength2, swellSpeed2,
+                swellDirection2, swellSteepness2 * steepScale, warp * 0.75f, worldX, worldZ, time);
+
+            // Wave 3: Secondary Cross Swell
+            disp += EvaluateGerstnerComponent(swellAmplitude3, swellWavelength3, swellSpeed3,
+                swellDirection3, swellSteepness3, warp * 0.60f, worldX, worldZ, time);
+
+            // Wave 4: Oblique Counter Sea
+            disp += EvaluateGerstnerComponent(0.38f, 33.0f, 1.45f,
+                new Vector2(0.978f, -0.208f), 0.38f, warp * 0.50f, worldX, worldZ, time);
+
+            // Wave 5: Intermediate Wind Sea
+            disp += EvaluateGerstnerComponent(0.26f, 21.5f, 1.62f,
+                new Vector2(0.743f, 0.669f), 0.34f, warp * 0.40f, worldX, worldZ, time);
+
+            // Wave 6: Short Choppy Sea
+            disp += EvaluateGerstnerComponent(0.18f, 14.8f, 1.82f,
+                new Vector2(0.766f, -0.643f), 0.30f, warp * 0.30f, worldX, worldZ, time);
+
+            // Wave 7: Fine Wind Wave
+            disp += EvaluateGerstnerComponent(0.12f, 9.6f, 2.08f,
+                new Vector2(0.995f, 0.105f), 0.25f, warp * 0.20f, worldX, worldZ, time);
+
+            // Wave 8: Capillary Chop
+            disp += EvaluateGerstnerComponent(0.07f, 5.4f, 2.42f,
+                new Vector2(0.819f, -0.574f), 0.20f, warp * 0.15f, worldX, worldZ, time);
+
+            // Crest sharpening & trough deepening:
+            // Pinches wave crests into sharp oceanic ridges while deepening normal troughs toward knee level
+            if (disp.y > 0f)
             {
-                Vector2 dir = swellDirection1.sqrMagnitude > 0.001f ? swellDirection1.normalized : Vector2.right;
-                float k = 2f * Mathf.PI / Mathf.Max(1f, swellWavelength1);
-                float w = Mathf.Sqrt(9.81f * k) * swellSpeed1;
-                float phase = k * (worldX * dir.x + worldZ * dir.y) - (w * time);
-
-                float sinP = Mathf.Sin(phase);
-                float cosP = Mathf.Cos(phase);
-
-                disp.y += swellAmplitude1 * sinP;
-                disp.x += dir.x * (swellSteepness1 * swellAmplitude1 * cosP);
-                disp.z += dir.y * (swellSteepness1 * swellAmplitude1 * cosP);
+                float crestFactor = Mathf.Clamp01(disp.y / 2.2f);
+                disp.y *= (1.0f + 0.30f * crestFactor);
             }
-
-            // Wave 2: Secondary Cross Swell
-            if (swellAmplitude2 > 0f)
+            else
             {
-                Vector2 dir = swellDirection2.sqrMagnitude > 0.001f ? swellDirection2.normalized : Vector2.up;
-                float k = 2f * Mathf.PI / Mathf.Max(1f, swellWavelength2);
-                float w = Mathf.Sqrt(9.81f * k) * swellSpeed2;
-                float phase = k * (worldX * dir.x + worldZ * dir.y) - (w * time);
-
-                float sinP = Mathf.Sin(phase);
-                float cosP = Mathf.Cos(phase);
-
-                disp.y += swellAmplitude2 * sinP;
-                disp.x += dir.x * (swellSteepness2 * swellAmplitude2 * cosP);
-                disp.z += dir.y * (swellSteepness2 * swellAmplitude2 * cosP);
-            }
-
-            // Wave 3: Fine Wind Chop
-            if (chopAmplitude > 0f)
-            {
-                float k = 2f * Mathf.PI / Mathf.Max(0.5f, chopWavelength);
-                float phase = k * (worldX * 0.707f + worldZ * 0.707f) - (chopSpeed * time);
-                disp.y += Mathf.Sin(phase) * chopAmplitude;
+                disp.y *= 1.30f;
             }
 
             return disp;
         }
 
+        /// <summary>
+        /// Returns total local displacement (swells + wake ripples) softly capped to [-maxTroughDepth, +maxTotalWaveHeight].
+        /// </summary>
+        public Vector3 GetClampedWaveDisplacement(float worldX, float worldZ, float time)
+        {
+            Vector3 swell = EvaluateOceanSwell(worldX, worldZ, time);
+            float ripple = SampleRippleHeight(worldX, worldZ);
+
+            float totalY = swell.y + ripple;
+            float heightLimit = Mathf.Max(0.25f, maxTotalWaveHeight);
+            float troughLimit = Mathf.Max(0.55f, maxTroughDepth);
+            float clampedY = totalY >= 0f ? SoftLimit(totalY, heightLimit) : SoftLimit(totalY, troughLimit);
+            float horizLimit = Mathf.Min(heightLimit * 0.45f, 2.4f);
+
+            return new Vector3(
+                Mathf.Clamp(swell.x, -horizLimit, horizLimit),
+                clampedY,
+                Mathf.Clamp(swell.z, -horizLimit, horizLimit)
+            );
+        }
+
         #endregion
 
-        #region Public Wave Generation (Footsteps, Splashes, Wakes)
+        #region Public Wake Generation (8-Slot Ring Buffer)
 
         /// <summary>
-        /// Injects a heavy footstep impact wave into the ocean surface.
-        /// Produces a deep crater depression and an expanding tidal crest ring.
+        /// Records a subtle, height-limited wake ripple into the GPU-evaluated 8-slot ring buffer.
         /// </summary>
-        /// <param name="worldPosition">Contact location of the foot</param>
-        /// <param name="radius">Radius of the shockwave in meters (e.g. 3m - 8m for a Jaeger)</param>
-        /// <param name="strength">Strength of the displacement</param>
         public void AddFootstepWave(Vector3 worldPosition, float radius, float strength)
         {
-            if (currentHeights == null) return;
+            if (!Application.isPlaying) return;
 
-            float halfSize = simAreaSize * 0.5f;
-            float localX = worldPosition.x - (simCenter.x - halfSize);
-            float localZ = worldPosition.z - (simCenter.z - halfSize);
+            float clampedStrength = Mathf.Clamp(strength, -maxRippleHeight, maxRippleHeight);
+            float clampedRadius = Mathf.Clamp(radius, 1.5f, 16f);
+            float invLifetime = 1f / Mathf.Max(0.5f, wakeLifetime);
 
-            if (localX < -radius || localX > simAreaSize + radius ||
-                localZ < -radius || localZ > simAreaSize + radius)
-                return;
-
-            int centerIdxX = Mathf.RoundToInt((localX / simAreaSize) * (simResolution - 1));
-            int centerIdxZ = Mathf.RoundToInt((localZ / simAreaSize) * (simResolution - 1));
-
-            int cellR = Mathf.CeilToInt((radius / simAreaSize) * (simResolution - 1));
-            int minX = Mathf.Clamp(centerIdxX - cellR, 1, simResolution - 2);
-            int maxX = Mathf.Clamp(centerIdxX + cellR, 1, simResolution - 2);
-            int minZ = Mathf.Clamp(centerIdxZ - cellR, 1, simResolution - 2);
-            int maxZ = Mathf.Clamp(centerIdxZ + cellR, 1, simResolution - 2);
-
-            float rSq = radius * radius;
-
-            for (int z = minZ; z <= maxZ; z++)
-            {
-                float worldPosZ = (simCenter.z - halfSize) + (z * cellSpacing);
-                float dz = worldPosZ - worldPosition.z;
-
-                for (int x = minX; x <= maxX; x++)
-                {
-                    float worldPosX = (simCenter.x - halfSize) + (x * cellSpacing);
-                    float dx = worldPosX - worldPosition.x;
-                    float distSq = dx * dx + dz * dz;
-
-                    if (distSq < rSq)
-                    {
-                        float dist = Mathf.Sqrt(distSq);
-                        // Dome-and-crest footstep profile: center depression + surrounding surge ring
-                        float normDist = dist / radius;
-                        float profile = -Mathf.Cos(normDist * Mathf.PI); // -1 at center, +1 at edge
-                        float falloff = 1f - normDist;
-
-                        currentHeights[x, z] += strength * profile * falloff;
-                    }
-                }
-            }
+            wakePositions[wakeCursor] = new Vector4(worldPosition.x, transform.position.y, worldPosition.z, Time.time);
+            wakeParams[wakeCursor] = new Vector4(clampedRadius, clampedStrength, Mathf.Max(1.0f, wakeExpansionSpeed), invLifetime);
+            wakeCursor = (wakeCursor + 1) % MAX_WAKES;
         }
 
         /// <summary>
-        /// Injects an advancing bow wake in front of a giant wading leg.
+        /// Emits a single subtle bow wake in front of a moving wading leg.
         /// </summary>
         public void AddWadingWake(Vector3 legPos, Vector3 legVelocity, float legWidth, float wakeStrength)
         {
-            if (legVelocity.sqrMagnitude < 0.1f) return;
+            Vector3 horizVel = new Vector3(legVelocity.x, 0f, legVelocity.z);
+            if (horizVel.sqrMagnitude < 0.1f) return;
 
-            Vector3 moveDir = legVelocity.normalized;
-            Vector3 bowWavePos = legPos + moveDir * (legWidth * 0.8f);
-            Vector3 lateralLeft = legPos - Vector3.Cross(moveDir, Vector3.up) * (legWidth * 0.7f);
-            Vector3 lateralRight = legPos + Vector3.Cross(moveDir, Vector3.up) * (legWidth * 0.7f);
-
-            // Forward surge crest
-            AddFootstepWave(bowWavePos, legWidth * 1.2f, wakeStrength * 0.7f);
-            // Lateral parting wave crests
-            AddFootstepWave(lateralLeft, legWidth * 0.9f, wakeStrength * 0.5f);
-            AddFootstepWave(lateralRight, legWidth * 0.9f, wakeStrength * 0.5f);
-            // Trailing depression wake
-            AddFootstepWave(legPos - moveDir * legWidth, legWidth, -wakeStrength * 0.4f);
+            Vector3 moveDir = horizVel.normalized;
+            float clampedStrength = Mathf.Clamp(wakeStrength, -0.12f, 0.12f);
+            AddFootstepWave(legPos + moveDir * (legWidth * 0.6f), legWidth * 1.4f, clampedStrength);
         }
 
         #endregion
@@ -305,59 +387,63 @@ namespace PacificRimWater
         #region Public Queries
 
         /// <summary>
-        /// Returns total water surface height (swells + dynamic footstep ripples) at world (X, Z).
+        /// Returns total height-capped water surface elevation (Y) at world (X, Z).
+        /// Matches the GPU vertex shader analytically.
         /// </summary>
         public float GetWaterHeight(Vector3 worldPos)
         {
             float time = Application.isPlaying ? Time.time : 0f;
-            Vector3 swell = EvaluateOceanSwell(worldPos.x, worldPos.z, time);
-            float ripple = SampleRippleHeight(worldPos.x, worldPos.z);
+            Vector3 disp = GetClampedWaveDisplacement(worldPos.x, worldPos.z, time);
 
-            return transform.position.y + swell.y + ripple;
+            float total = transform.position.y + disp.y;
+            return (float.IsNaN(total) || float.IsInfinity(total)) ? transform.position.y : total;
         }
 
         /// <summary>
-        /// Samples dynamic ripple elevation using bilinear interpolation.
+        /// Analytically evaluates the 8 active wake slots at world (X, Z).
         /// </summary>
         public float SampleRippleHeight(float worldX, float worldZ)
         {
-            if (currentHeights == null) return 0f;
+            if (!Application.isPlaying) return 0f;
 
-            float halfSize = simAreaSize * 0.5f;
-            float localX = worldX - (simCenter.x - halfSize);
-            float localZ = worldZ - (simCenter.z - halfSize);
+            float time = Time.time;
+            float sum = 0f;
 
-            if (localX < 0f || localX >= simAreaSize || localZ < 0f || localZ >= simAreaSize)
-                return 0f;
+            for (int i = 0; i < MAX_WAKES; i++)
+            {
+                Vector4 posTime = wakePositions[i];
+                Vector4 p = wakeParams[i];
+                float age = time - posTime.w;
+                float normalizedAge = age * p.w;
 
-            float normX = (localX / simAreaSize) * (simResolution - 1);
-            float normZ = (localZ / simAreaSize) * (simResolution - 1);
+                if (age <= 0f || normalizedAge >= 1f || Mathf.Abs(p.y) < 0.0001f)
+                    continue;
 
-            int x0 = Mathf.Clamp(Mathf.FloorToInt(normX), 0, simResolution - 2);
-            int z0 = Mathf.Clamp(Mathf.FloorToInt(normZ), 0, simResolution - 2);
-            int x1 = x0 + 1;
-            int z1 = z0 + 1;
+                float timeDecay = 1f - normalizedAge;
+                timeDecay *= timeDecay;
 
-            float tx = normX - x0;
-            float tz = normZ - z0;
+                float dx = worldX - posTime.x;
+                float dz = worldZ - posTime.z;
+                float dist = Mathf.Sqrt(dx * dx + dz * dz);
 
-            float h00 = currentHeights[x0, z0];
-            float h10 = currentHeights[x1, z0];
-            float h01 = currentHeights[x0, z1];
-            float h11 = currentHeights[x1, z1];
+                float radius = Mathf.Max(1.5f, p.x);
+                float waveFront = age * p.z;
+                float ringWidth = Mathf.Max(1.5f, radius * 0.45f);
+                float dRing = (dist - waveFront) / ringWidth;
 
-            float top = Mathf.Lerp(h00, h10, tx);
-            float bottom = Mathf.Lerp(h01, h11, tx);
+                float radialEnv = Mathf.Exp(-dRing * dRing) * Mathf.Exp(-dist / Mathf.Max(radius * 2.2f, 2f));
+                sum += Mathf.Cos(dRing * 2.4f) * radialEnv * timeDecay * p.y;
+            }
 
-            return Mathf.Lerp(top, bottom, tz);
+            return SoftLimit(sum, maxRippleHeight);
         }
 
         /// <summary>
-        /// Returns surface normal for ocean lighting, buoyancy tilting, and spray orientation.
+        /// Returns analytical surface normal for ocean lighting, buoyancy tilting, and spray orientation.
         /// </summary>
         public Vector3 GetWaterNormal(Vector3 worldPos)
         {
-            float eps = 0.35f;
+            float eps = 0.4f;
             float hL = GetWaterHeight(worldPos - Vector3.right * eps);
             float hR = GetWaterHeight(worldPos + Vector3.right * eps);
             float hD = GetWaterHeight(worldPos - Vector3.forward * eps);
@@ -366,9 +452,6 @@ namespace PacificRimWater
             return new Vector3(-(hR - hL) / (2f * eps), 1f, -(hU - hD) / (2f * eps)).normalized;
         }
 
-        /// <summary>
-        /// Checks if a position is submerged under water.
-        /// </summary>
         public bool IsSubmerged(Vector3 worldPos, out float depth)
         {
             float surfaceY = GetWaterHeight(worldPos);
@@ -380,10 +463,10 @@ namespace PacificRimWater
 
         void OnDrawGizmosSelected()
         {
-            Gizmos.color = new Color(0f, 0.8f, 1f, 0.3f);
-            Vector3 center = simCenter;
+            Gizmos.color = new Color(0f, 0.8f, 1f, 0.35f);
+            Vector3 center = followTarget != null ? followTarget.position : transform.position;
             center.y = transform.position.y;
-            Gizmos.DrawWireCube(center, new Vector3(simAreaSize, 4f, simAreaSize));
+            Gizmos.DrawWireCube(center, new Vector3(simAreaSize, maxTotalWaveHeight * 2f, simAreaSize));
         }
     }
 }

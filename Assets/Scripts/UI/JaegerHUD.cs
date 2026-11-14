@@ -1,0 +1,752 @@
+using UnityEngine;
+using UnityEngine.UI;
+using PacificRimWater;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
+
+namespace PacificRimUI
+{
+    public class JaegerHUD : MonoBehaviour
+    {
+        public static JaegerHUD Instance { get; private set; }
+        public static bool IsHudHidden { get; private set; } = false;
+
+        [Header("Jaeger Reference")]
+        [SerializeField] private SimpleJaegerController jaeger;
+
+        [Header("Top Header Telemetry")]
+        [SerializeField] private Text chassisLabelText;
+        [SerializeField] private Text linkStatusText;
+
+        [Header("Hull & Overcharge Panel (Bottom-Left)")]
+        [SerializeField] private Text hullCaptionText;
+        [SerializeField] private Text hullNumberText;
+        [SerializeField] private PacificRimBar hullBar;
+        [SerializeField] private Text staminaCaptionText;
+        [SerializeField] private Text staminaValueText;
+        [SerializeField] private PacificRimBar staminaBar;
+        [SerializeField] private GameObject overchargeContainer;
+        [SerializeField] private PacificRimBar overchargeBar;
+        [SerializeField] private Text overchargeStatusText;
+        [SerializeField] private Text overchargeTimerText;
+
+        [Header("Combat Matrix Panel (Bottom-Right)")]
+        [SerializeField] private Text combatStanceValueText;
+        [SerializeField] private Text defenseMatrixValueText;
+        [SerializeField] private Text depthTelemetryText;
+
+        [Header("Reticle & Subtle Overcharge Screen Cue")]
+        [SerializeField] private UIHoloReticleGraphic holoReticle;
+        [SerializeField] private CanvasGroup overchargeScreenCueGroup;
+
+        [Header("Screen Impact & Block Flash Overlay")]
+        [SerializeField] private CanvasGroup impactFlashGroup;
+        [SerializeField] private UIGradientGraphic[] impactEdges;
+
+        [Header("Footer Key Prompts")]
+        [SerializeField] private PacificRimKeyPrompt stancePrompt;
+        [SerializeField] private PacificRimKeyPrompt lightAttackPrompt;
+        [SerializeField] private PacificRimKeyPrompt heavyAttackPrompt;
+        [SerializeField] private PacificRimKeyPrompt defensePrompt;
+        [SerializeField] private PacificRimKeyPrompt overchargePrompt;
+        [SerializeField] private PacificRimKeyPrompt menuPrompt;
+
+        [Header("Notification Banner (Top-Center)")]
+        [SerializeField] private CanvasGroup bannerGroup;
+        [SerializeField] private Text bannerText;
+
+        [Header("Boss Health Bar (Top-Center)")]
+        [SerializeField] private KaijuAI kaiju;
+        [SerializeField] private GameObject bossPanelRoot;
+        [SerializeField] private Text bossNameText;
+        [SerializeField] private Text bossPhaseText;
+        [SerializeField] private Text bossStatusText;
+        [SerializeField] private Text bossHpNumberText;
+        [SerializeField] private PacificRimBar bossHealthBar;
+        [SerializeField] private PacificRimBar bossSubBar;
+
+        private float powerUpTimer;
+        private float bannerTimer;
+        private float bannerAlpha;
+        private bool wasPoweredUp;
+        private bool wasInStance;
+        private bool wasBlocking;
+        private bool wasKaijuEmpBuffed;
+        private bool wasKaijuDead;
+        private bool wasJaegerDead;
+        private int wasKaijuPhase = 1;
+        private float impactFlashAlpha;
+        private float lastExhaustedBannerTime = -10f;
+        private bool stateInitialized;
+        private CanvasGroup hudCanvasGroup;
+
+        // GTA-style "baguvix" cheat code state
+        private string cheatInputBuffer = "";
+        private int lastCheatCharFrame = -1;
+        private char lastCheatChar = '\0';
+
+        private static readonly Color StaminaCyan = new Color(0.28f, 0.88f, 0.96f, 1f);
+
+        private void Awake()
+        {
+            Instance = this;
+            EnsureCanvasGroup();
+            ResolveReferences();
+        }
+
+        private void OnEnable()
+        {
+            Instance = this;
+            stateInitialized = false;
+            EnsureCanvasGroup();
+            ApplyHudVisibility();
+#if ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null)
+            {
+                Keyboard.current.onTextInput += OnTextInputReceived;
+            }
+#endif
+            ResolveReferences();
+            SyncImmediate();
+        }
+
+        private void OnDisable()
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null)
+            {
+                Keyboard.current.onTextInput -= OnTextInputReceived;
+            }
+#endif
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+                Instance = null;
+        }
+
+        private void EnsureCanvasGroup()
+        {
+            if (hudCanvasGroup == null)
+            {
+                hudCanvasGroup = GetComponent<CanvasGroup>();
+                if (hudCanvasGroup == null)
+                {
+                    hudCanvasGroup = gameObject.AddComponent<CanvasGroup>();
+                }
+            }
+        }
+
+        public void SetHudHidden(bool hidden)
+        {
+            IsHudHidden = hidden;
+            ApplyHudVisibility();
+        }
+
+        private void ApplyHudVisibility()
+        {
+            EnsureCanvasGroup();
+            if (hudCanvasGroup != null)
+            {
+                hudCanvasGroup.alpha = IsHudHidden ? 0f : 1f;
+                hudCanvasGroup.blocksRaycasts = !IsHudHidden;
+                hudCanvasGroup.interactable = !IsHudHidden;
+            }
+        }
+
+        private static bool WasTildePressedThisFrame()
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null && Keyboard.current.backquoteKey.wasPressedThisFrame)
+                return true;
+#endif
+            try
+            {
+                if (Input.GetKeyDown(KeyCode.BackQuote))
+                    return true;
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
+#if ENABLE_INPUT_SYSTEM
+        private void OnTextInputReceived(char c)
+        {
+            if (MainMenuUI.IsMenuOpen) return;
+            AppendCheatChar(c);
+        }
+#endif
+
+        private void UpdateCheatCodeInput()
+        {
+            if (MainMenuUI.IsMenuOpen) return;
+
+            // 1. Process legacy Input.inputString if available
+            try
+            {
+                string inputStr = Input.inputString;
+                if (!string.IsNullOrEmpty(inputStr))
+                {
+                    for (int i = 0; i < inputStr.Length; i++)
+                    {
+                        char c = inputStr[i];
+                        if (char.IsLetter(c))
+                        {
+                            AppendCheatChar(c);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Legacy input disabled
+            }
+
+            // 2. Poll New Input System keyboard keys
+#if ENABLE_INPUT_SYSTEM
+            var kb = Keyboard.current;
+            if (kb != null)
+            {
+                if (kb.bKey.wasPressedThisFrame) AppendCheatChar('b');
+                else if (kb.aKey.wasPressedThisFrame) AppendCheatChar('a');
+                else if (kb.gKey.wasPressedThisFrame) AppendCheatChar('g');
+                else if (kb.uKey.wasPressedThisFrame) AppendCheatChar('u');
+                else if (kb.vKey.wasPressedThisFrame) AppendCheatChar('v');
+                else if (kb.iKey.wasPressedThisFrame) AppendCheatChar('i');
+                else if (kb.xKey.wasPressedThisFrame) AppendCheatChar('x');
+                else if (kb.cKey.wasPressedThisFrame) AppendCheatChar('c');
+                else if (kb.dKey.wasPressedThisFrame) AppendCheatChar('d');
+                else if (kb.eKey.wasPressedThisFrame) AppendCheatChar('e');
+                else if (kb.fKey.wasPressedThisFrame) AppendCheatChar('f');
+                else if (kb.hKey.wasPressedThisFrame) AppendCheatChar('h');
+                else if (kb.jKey.wasPressedThisFrame) AppendCheatChar('j');
+                else if (kb.kKey.wasPressedThisFrame) AppendCheatChar('k');
+                else if (kb.lKey.wasPressedThisFrame) AppendCheatChar('l');
+                else if (kb.mKey.wasPressedThisFrame) AppendCheatChar('m');
+                else if (kb.nKey.wasPressedThisFrame) AppendCheatChar('n');
+                else if (kb.oKey.wasPressedThisFrame) AppendCheatChar('o');
+                else if (kb.pKey.wasPressedThisFrame) AppendCheatChar('p');
+                else if (kb.qKey.wasPressedThisFrame) AppendCheatChar('q');
+                else if (kb.rKey.wasPressedThisFrame) AppendCheatChar('r');
+                else if (kb.sKey.wasPressedThisFrame) AppendCheatChar('s');
+                else if (kb.tKey.wasPressedThisFrame) AppendCheatChar('t');
+                else if (kb.wKey.wasPressedThisFrame) AppendCheatChar('w');
+                else if (kb.yKey.wasPressedThisFrame) AppendCheatChar('y');
+                else if (kb.zKey.wasPressedThisFrame) AppendCheatChar('z');
+            }
+#endif
+        }
+
+        private void AppendCheatChar(char c)
+        {
+            char lower = char.ToLowerInvariant(c);
+            if (!char.IsLetter(lower)) return;
+
+            // Deduplicate if multiple input providers fired on the same frame
+            if (Time.frameCount == lastCheatCharFrame && lastCheatChar == lower)
+            {
+                return;
+            }
+            lastCheatCharFrame = Time.frameCount;
+            lastCheatChar = lower;
+
+            cheatInputBuffer += lower;
+            if (cheatInputBuffer.Length > 24)
+            {
+                cheatInputBuffer = cheatInputBuffer.Substring(cheatInputBuffer.Length - 24);
+            }
+
+            if (cheatInputBuffer.EndsWith("baguvix", System.StringComparison.OrdinalIgnoreCase))
+            {
+                cheatInputBuffer = "";
+                TriggerBaguvixCheat();
+            }
+            else if (cheatInputBuffer.EndsWith("hesoyam", System.StringComparison.OrdinalIgnoreCase))
+            {
+                cheatInputBuffer = "";
+                TriggerHesoyamCheat();
+            }
+        }
+
+        public void TriggerHesoyamCheat()
+        {
+            if (kaiju == null)
+                kaiju = FindAnyObjectByType<KaijuAI>();
+
+            if (kaiju != null)
+            {
+                kaiju.DisableAIEntirely();
+            }
+
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDCheatActivated();
+            PacificRimUISound.PlaySuccess();
+            ShowBanner("CHEAT ACTIVATED // HESOYAM: KAIJU AI DISABLED", 4.0f);
+            Debug.Log("<color=#00e5ff><b>[CHEAT]</b></color> HESOYAM ACTIVATED: Leatherback's AI is completely disabled until level restart!");
+        }
+
+        public void TriggerBaguvixCheat()
+        {
+            if (kaiju == null)
+                kaiju = FindAnyObjectByType<KaijuAI>();
+
+            if (kaiju != null)
+            {
+                kaiju.ActivateBaguvixCheat();
+            }
+
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDCheatActivated();
+            PacificRimUISound.PlaySuccess();
+            ShowBanner("CHEAT ACTIVATED // BAGUVIX: PACIFIST KAIJU", 4.0f);
+            Debug.Log("<color=#00e5ff><b>[CHEAT]</b></color> BAGUVIX ACTIVATED: Leatherback's hostility disabled! Fallback AI & invulnerability engaged until level restart.");
+        }
+
+        private void ResolveReferences()
+        {
+            if (jaeger == null)
+                jaeger = FindAnyObjectByType<SimpleJaegerController>();
+            if (kaiju == null)
+                kaiju = FindAnyObjectByType<KaijuAI>();
+        }
+
+        private void Update()
+        {
+            // In-game HUD toggle via Tilde key (~)
+            if (!MainMenuUI.IsMenuOpen && WasTildePressedThisFrame())
+            {
+                SetHudHidden(!IsHudHidden);
+            }
+
+            // GTA-style "baguvix" cheat code detection
+            UpdateCheatCodeInput();
+
+            ResolveReferences();
+            if (jaeger == null) return;
+
+            if (!stateInitialized)
+            {
+                SyncImmediate();
+                return;
+            }
+
+            UpdateHullAndOvercharge();
+            UpdateStamina();
+            UpdateCombatAndTelemetry();
+            UpdateBossHealthBar();
+            UpdateScreenImpact();
+            UpdateBanner();
+        }
+
+        private void SyncImmediate()
+        {
+            if (jaeger == null) return;
+            wasPoweredUp = jaeger.IsPoweredUp;
+            wasInStance = jaeger.inCombatStance;
+            wasBlocking = jaeger.isBlocking;
+            powerUpTimer = jaeger.IsPoweredUp ? Mathf.Max(0.01f, jaeger.powerUpDuration) : 0f;
+            wasKaijuEmpBuffed = kaiju != null && kaiju.IsEmpBuffed;
+            wasKaijuDead = kaiju != null && kaiju.IsDead;
+            wasJaegerDead = jaeger != null && jaeger.IsDead;
+            wasKaijuPhase = kaiju != null ? kaiju.CurrentPhase : 1;
+            impactFlashAlpha = 0f;
+            if (impactFlashGroup != null)
+                impactFlashGroup.alpha = 0f;
+            stateInitialized = true;
+
+            if (hullBar != null && jaeger.maxHealth > 0f)
+                hullBar.SetRatioImmediate(jaeger.currentHealth / jaeger.maxHealth);
+
+            if (staminaBar != null)
+                staminaBar.SetRatioImmediate(jaeger.StaminaRatio);
+
+            if (kaiju != null && bossHealthBar != null && kaiju.maxHealth > 0f)
+                bossHealthBar.SetRatioImmediate(kaiju.currentHealth / kaiju.maxHealth);
+
+            UpdateHullAndOvercharge();
+            UpdateStamina();
+            UpdateCombatAndTelemetry();
+            UpdateBossHealthBar();
+        }
+
+        public void ShowBanner(string message, float duration = 2.5f)
+        {
+            if (bannerText != null)
+            {
+                bannerText.supportRichText = true;
+                bannerText.text = PacificRimUITheme.Track(message, 2, Mathf.Max(12, bannerText.fontSize), true);
+            }
+            bannerTimer = Mathf.Max(0.25f, duration);
+        }
+
+        private void UpdateHullAndOvercharge()
+        {
+            float maxHp = Mathf.Max(1f, jaeger.maxHealth);
+            float curHp = Mathf.Clamp(jaeger.currentHealth, 0f, maxHp);
+            float ratio = curHp / maxHp;
+
+            if (hullNumberText != null)
+            {
+                hullNumberText.text = PacificRimUITheme.FormatNumber(Mathf.CeilToInt(curHp));
+                hullNumberText.color = ratio < 0.25f
+                    ? PacificRimUITheme.Danger
+                    : (ratio < 0.50f ? PacificRimUITheme.Amber : PacificRimUITheme.Health);
+            }
+
+            if (hullBar != null)
+            {
+                hullBar.SetRatio(ratio);
+                if (hullBar.fillImage != null)
+                {
+                    hullBar.fillImage.color = ratio < 0.25f
+                        ? PacificRimUITheme.Danger
+                        : (ratio < 0.50f ? PacificRimUITheme.Amber : PacificRimUITheme.Blue);
+                }
+            }
+
+            if (hullCaptionText != null)
+            {
+                hullCaptionText.text = jaeger.IsDead ? "HULL COMPROMISED // DESTROYED" : "HULL INTEGRITY";
+                hullCaptionText.color = jaeger.IsDead ? PacificRimUITheme.Danger : PacificRimUITheme.TextDim;
+            }
+
+            if (jaeger.IsDead && !wasJaegerDead)
+            {
+                PacificRimUISound.PlayDeny();
+                ShowBanner("CRITICAL HULL BREACH // JAEGER DESTROYED", 4.0f);
+            }
+            wasJaegerDead = jaeger.IsDead;
+
+            // Overcharge transition & countdown
+            bool powered = jaeger.IsPoweredUp;
+            if (powered && !wasPoweredUp)
+            {
+                powerUpTimer = Mathf.Max(0.1f, jaeger.powerUpDuration);
+                PacificRimUISound.PlaySuccess();
+                ShowBanner("TURBINE OVERCHARGE ENGAGED", 2.2f);
+            }
+            wasPoweredUp = powered;
+
+            if (powered)
+            {
+                powerUpTimer = Mathf.Max(0f, powerUpTimer - Time.deltaTime);
+                float duration = Mathf.Max(0.1f, jaeger.powerUpDuration);
+                float powerRatio = Mathf.Clamp01(powerUpTimer / duration);
+
+                if (overchargeContainer != null && !overchargeContainer.activeSelf)
+                    overchargeContainer.SetActive(true);
+
+                if (overchargeBar != null)
+                {
+                    overchargeBar.SetRatio(powerRatio);
+                    if (overchargeBar.fillImage != null)
+                        overchargeBar.fillImage.color = PacificRimUITheme.BlueBright;
+                }
+
+                if (overchargeStatusText != null)
+                {
+                    overchargeStatusText.supportRichText = true;
+                    overchargeStatusText.text = PacificRimUITheme.Track("TURBINE OVERCHARGE", 2, 12, true);
+                    overchargeStatusText.color = PacificRimUITheme.BlueBright;
+                }
+
+                if (overchargeTimerText != null)
+                {
+                    overchargeTimerText.text = $"{powerUpTimer:0.0}S";
+                    overchargeTimerText.color = PacificRimUITheme.Text;
+                }
+            }
+            else
+            {
+                if (overchargeContainer != null && overchargeContainer.activeSelf)
+                    overchargeContainer.SetActive(false);
+
+                if (overchargeBar != null)
+                    overchargeBar.SetRatio(0f);
+            }
+
+            // Subtle non-obstructive peripheral screen cue while Overcharged
+            if (overchargeScreenCueGroup != null)
+            {
+                float targetAlpha = powered ? (0.14f + 0.06f * Mathf.Sin(Time.time * 4.5f)) : 0f;
+                overchargeScreenCueGroup.alpha = Mathf.Lerp(overchargeScreenCueGroup.alpha, targetAlpha, Time.deltaTime * 10f);
+            }
+        }
+
+        private void UpdateCombatAndTelemetry()
+        {
+            bool inStance = jaeger.inCombatStance;
+            if (inStance != wasInStance)
+            {
+                wasInStance = inStance;
+                PacificRimUISound.Play(inStance ? PacificRimUISound.SoundType.Tab : PacificRimUISound.SoundType.Back);
+            }
+
+            bool blocking = jaeger.isBlocking;
+            if (blocking && !wasBlocking)
+            {
+                PacificRimUISound.PlayClick();
+            }
+            wasBlocking = blocking;
+
+            if (combatStanceValueText != null)
+            {
+                combatStanceValueText.supportRichText = true;
+                combatStanceValueText.text = PacificRimUITheme.Track(
+                    inStance ? "ENGAGED // COMBAT READY" : "STANDBY",
+                    1, 13, true);
+                combatStanceValueText.color = inStance ? PacificRimUITheme.BlueBright : PacificRimUITheme.TextDim;
+            }
+
+            if (defenseMatrixValueText != null)
+            {
+                defenseMatrixValueText.supportRichText = true;
+                defenseMatrixValueText.text = PacificRimUITheme.Track(
+                    blocking ? "MATRIX LOCKED" : "OPEN",
+                    1, 13, true);
+                defenseMatrixValueText.color = blocking ? PacificRimUITheme.BlueBright : PacificRimUITheme.TextDim;
+            }
+
+            if (depthTelemetryText != null)
+            {
+                float waterY = 0f;
+                if (WaterSystem.Instance != null)
+                {
+                    waterY = WaterSystem.Instance.GetWaterHeight(jaeger.transform.position);
+                }
+                float depth = Mathf.Max(0f, waterY - jaeger.transform.position.y);
+                depthTelemetryText.supportRichText = true;
+                depthTelemetryText.text = PacificRimUITheme.Track($"SEA DEPTH {depth:0.0}M", 1, 13, true);
+            }
+
+            // Update tactical prompts (attacks are always armed)
+            if (stancePrompt != null && stancePrompt.gameObject.activeSelf)
+                stancePrompt.gameObject.SetActive(false);
+            if (lightAttackPrompt != null)
+                lightAttackPrompt.SetHighlight(false, PacificRimUITheme.BlueBright);
+            if (heavyAttackPrompt != null)
+                heavyAttackPrompt.SetHighlight(false, PacificRimUITheme.BlueBright);
+            if (defensePrompt != null)
+                defensePrompt.SetHighlight(blocking, PacificRimUITheme.BlueBright);
+            if (overchargePrompt != null)
+                overchargePrompt.SetHighlight(jaeger.IsPoweredUp, PacificRimUITheme.Amber);
+
+            // Reticle state tint
+            if (holoReticle != null)
+            {
+                Color targetColor;
+                if (blocking)
+                    targetColor = new Color(PacificRimUITheme.BlueBright.r, PacificRimUITheme.BlueBright.g, PacificRimUITheme.BlueBright.b, 0.85f);
+                else if (inStance)
+                    targetColor = jaeger.IsPoweredUp
+                        ? new Color(PacificRimUITheme.BlueBright.r, PacificRimUITheme.BlueBright.g, 1f, 0.78f)
+                        : new Color(PacificRimUITheme.Blue.r, PacificRimUITheme.Blue.g, PacificRimUITheme.Blue.b, 0.65f);
+                else
+                    targetColor = new Color(PacificRimUITheme.TextDim.r, PacificRimUITheme.TextDim.g, PacificRimUITheme.TextDim.b, 0.28f);
+
+                holoReticle.color = Color.Lerp(holoReticle.color, targetColor, Time.deltaTime * 12f);
+            }
+        }
+
+        private void UpdateBossHealthBar()
+        {
+            if (bossPanelRoot == null) return;
+
+            bool hasKaiju = kaiju != null;
+            if (bossPanelRoot.activeSelf != hasKaiju)
+                bossPanelRoot.SetActive(hasKaiju);
+
+            if (!hasKaiju) return;
+
+            float maxHp = Mathf.Max(1f, kaiju.maxHealth);
+            float curHp = Mathf.Clamp(kaiju.currentHealth, 0f, maxHp);
+            float hpRatio = curHp / maxHp;
+
+            if (bossHpNumberText != null)
+            {
+                bossHpNumberText.text = $"{PacificRimUITheme.FormatNumber(Mathf.CeilToInt(curHp))} / {PacificRimUITheme.FormatNumber(Mathf.CeilToInt(maxHp))}";
+                bossHpNumberText.color = kaiju.IsDead ? PacificRimUITheme.TextDim : PacificRimUITheme.Text;
+            }
+
+            if (bossPhaseText != null)
+            {
+                bossPhaseText.text = kaiju.PhaseTitleLabel;
+                bossPhaseText.color = kaiju.CurrentPhase >= 3
+                    ? PacificRimUITheme.Danger
+                    : (kaiju.CurrentPhase == 2 ? PacificRimUITheme.Amber : PacificRimUITheme.BlueBright);
+            }
+
+            if (bossHealthBar != null)
+            {
+                bossHealthBar.SetRatio(hpRatio);
+                if (bossHealthBar.fillImage != null)
+                {
+                    if (kaiju.IsEmpBuffed)
+                        bossHealthBar.fillImage.color = PacificRimUITheme.BlueBright;
+                    else if (kaiju.IsBlocking || kaiju.IsStaggered)
+                        bossHealthBar.fillImage.color = PacificRimUITheme.Amber;
+                    else
+                        bossHealthBar.fillImage.color = PacificRimUITheme.Danger;
+                }
+            }
+
+            if (bossStatusText != null)
+            {
+                bossStatusText.supportRichText = true;
+                string label = kaiju.TacticalStatusLabel;
+                bossStatusText.text = PacificRimUITheme.Track(label, 2, 11, true);
+                if (kaiju.IsDead)
+                    bossStatusText.color = PacificRimUITheme.Success;
+                else if (kaiju.IsEmpBuffed)
+                    bossStatusText.color = PacificRimUITheme.BlueBright;
+                else if (kaiju.IsBlocking || kaiju.IsStaggered)
+                    bossStatusText.color = PacificRimUITheme.Amber;
+                else
+                    bossStatusText.color = PacificRimUITheme.Danger;
+            }
+
+            if (bossSubBar != null)
+            {
+                float subRatio = kaiju.IsEmpBuffed && kaiju.EmpBuffDuration > 0.01f
+                    ? Mathf.Clamp01(kaiju.EmpBuffRemaining / kaiju.EmpBuffDuration)
+                    : kaiju.PoiseRatio;
+                bossSubBar.SetRatio(kaiju.IsDead ? 0f : subRatio);
+                if (bossSubBar.fillImage != null)
+                {
+                    bossSubBar.fillImage.color = kaiju.IsEmpBuffed
+                        ? PacificRimUITheme.BlueBright
+                        : PacificRimUITheme.Amber;
+                }
+            }
+
+            if (kaiju.CurrentPhase > wasKaijuPhase)
+            {
+                if (kaiju.CurrentPhase == 2)
+                    ShowBanner("ALERT // LEATHERBACK ENTERED PHASE II: BIO-EMP OVERDRIVE", 3.2f);
+                else if (kaiju.CurrentPhase >= 3)
+                    ShowBanner("CRITICAL // LEATHERBACK PHASE III: CATEGORY IV BERSERKER", 3.6f);
+            }
+            wasKaijuPhase = kaiju.CurrentPhase;
+
+            if (kaiju.IsEmpBuffed && !wasKaijuEmpBuffed)
+            {
+                ShowBanner("WARNING // LEATHERBACK BIO-EMP OVERCHARGE", 2.8f);
+            }
+            wasKaijuEmpBuffed = kaiju.IsEmpBuffed;
+
+            if (kaiju.IsDead && !wasKaijuDead)
+            {
+                PacificRimUISound.PlaySuccess();
+                ShowBanner("CATEGORY IV KAIJU NEUTRALIZED // VICTORY", 5.0f);
+            }
+            wasKaijuDead = kaiju.IsDead;
+        }
+
+        private void UpdateStamina()
+        {
+            if (jaeger == null) return;
+
+            float ratio = Mathf.Clamp01(jaeger.StaminaRatio);
+            if (staminaBar != null)
+            {
+                staminaBar.SetRatio(ratio);
+                if (staminaBar.fillImage != null)
+                {
+                    if (jaeger.IsExhausted)
+                    {
+                        float pulse = 0.65f + 0.35f * Mathf.Sin(Time.unscaledTime * 12f);
+                        staminaBar.fillImage.color = Color.Lerp(PacificRimUITheme.Danger, PacificRimUITheme.Amber, pulse * 0.45f);
+                    }
+                    else if (ratio < 0.35f)
+                    {
+                        staminaBar.fillImage.color = PacificRimUITheme.Amber;
+                    }
+                    else
+                    {
+                        staminaBar.fillImage.color = StaminaCyan;
+                    }
+                }
+            }
+
+            if (staminaCaptionText != null)
+            {
+                staminaCaptionText.text = jaeger.IsExhausted ? "ACTUATOR EXHAUSTED (<35%)" : "ACTUATOR STAMINA";
+                staminaCaptionText.color = jaeger.IsExhausted ? PacificRimUITheme.Danger : PacificRimUITheme.TextDim;
+            }
+
+            if (staminaValueText != null)
+            {
+                staminaValueText.text = $"{Mathf.RoundToInt(ratio * 100f)}%";
+                staminaValueText.color = jaeger.IsExhausted
+                    ? PacificRimUITheme.Danger
+                    : (ratio < 0.35f ? PacificRimUITheme.Amber : PacificRimUITheme.Text);
+            }
+        }
+
+        private void UpdateScreenImpact()
+        {
+            if (impactFlashGroup == null) return;
+
+            impactFlashAlpha = Mathf.MoveTowards(impactFlashAlpha, 0f, Time.unscaledDeltaTime * 2.8f);
+            impactFlashGroup.alpha = impactFlashAlpha;
+        }
+
+        public void TriggerScreenImpact(bool wasBlocked, bool isHeavy)
+        {
+            impactFlashAlpha = Mathf.Max(
+                impactFlashAlpha,
+                wasBlocked ? (isHeavy ? 0.72f : 0.50f) : (isHeavy ? 0.92f : 0.68f));
+
+            if (impactFlashGroup != null)
+                impactFlashGroup.alpha = impactFlashAlpha;
+
+            if (impactEdges == null) return;
+
+            Color baseColor = wasBlocked
+                ? PacificRimUITheme.BlueBright
+                : (isHeavy ? PacificRimUITheme.Danger : PacificRimUITheme.Amber);
+            float edgeAlpha = wasBlocked ? 0.46f : (isHeavy ? 0.64f : 0.48f);
+            Color edgeTint = new Color(baseColor.r, baseColor.g, baseColor.b, edgeAlpha);
+
+            for (int i = 0; i < impactEdges.Length; i++)
+            {
+                if (impactEdges[i] == null) continue;
+                string edgeName = impactEdges[i].gameObject.name;
+                if (edgeName.EndsWith("Top"))
+                    impactEdges[i].SetVertical(edgeTint, Color.clear);
+                else if (edgeName.EndsWith("Bottom"))
+                    impactEdges[i].SetVertical(Color.clear, edgeTint);
+                else if (edgeName.EndsWith("Left"))
+                    impactEdges[i].SetHorizontal(edgeTint, Color.clear);
+                else
+                    impactEdges[i].SetHorizontal(Color.clear, edgeTint);
+            }
+        }
+
+        public void NotifyStaminaExhausted()
+        {
+            if (Time.unscaledTime - lastExhaustedBannerTime < 2.0f) return;
+            lastExhaustedBannerTime = Time.unscaledTime;
+            ShowBanner("ACTUATOR EXHAUSTED // RECOVER TO 35% TO ATTACK", 2.2f);
+        }
+
+        private void UpdateBanner()
+        {
+            if (bannerGroup == null) return;
+
+            if (bannerTimer > 0f)
+            {
+                bannerTimer -= Time.deltaTime;
+                bannerAlpha = Mathf.MoveTowards(bannerAlpha, 1f, Time.deltaTime * 6f);
+            }
+            else
+            {
+                bannerAlpha = Mathf.MoveTowards(bannerAlpha, 0f, Time.deltaTime * 3.5f);
+            }
+
+            bannerGroup.alpha = bannerAlpha;
+        }
+    }
+}

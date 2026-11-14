@@ -1,238 +1,1631 @@
+using System.Collections;
 using UnityEngine;
 
 namespace PacificRimWater
 {
     /// <summary>
-    /// Colossal Kaiju AI for Pacific Rim combat.
-    /// Stalks and wades through deep ocean water toward the Jaeger,
-    /// creating massive tidal shockwaves, water eruptions, and ocean slam attacks.
+    /// Multi-phase God of War / Real Steel-inspired Boss AI for Category IV Kaiju Leatherback.
+    /// Features forward/backward walking and sprinting, tactical retreating, predatory circle-strafing
+    /// with procedural 2-bone leg IK and head/torso lock-on, predictive anti-spam forearm blocking,
+    /// hyper-armored counters, exact directional staggers (Right/Left/Up) with combo-breaker,
+    /// combat sparks feedback, and 3 escalating combat phases.
     /// </summary>
+    [DefaultExecutionOrder(-20)]
     [RequireComponent(typeof(Rigidbody))]
     public class KaijuAI : MonoBehaviour
     {
-        public enum KaijuState { Idle, Stalking, Attacking, Stunned }
+        public enum AIState
+        {
+            Idle,
+            ChasingAndStrafing,
+            SizingUp,
+            Retreating,
+            EmpRoar,
+            PhaseTransition,
+            Attacking,
+            Blocking,
+            Staggered,
+            Dead
+        }
 
-        [Header("Target & Detection")]
-        [Tooltip("The Jaeger Mech to stalk and fight.")]
-        public Transform target;
+        public enum AttackPattern
+        {
+            None,
+            LeftHook,
+            RightHook,
+            DoubleHookCombo,
+            TripleBrawlerCombo,
+            HeavySlam,
+            SprintChargeSlam
+        }
+
+        private const float PunchClipLength = 0.97f;
+        private const float SlamClipLength = 1.13f;
+        private const float EmpClipLength = 2.63f;
+        private const float StaggerSideClipLength = 1.97f;
+        private const float StaggerUpClipLength = 2.30f;
+        private const float DeathClipLength = 4.30f;
+
+        private static readonly int LocomotionSpeedHash = Animator.StringToHash("LocomotionSpeed");
+
+        [Header("Target & References")]
+        [Tooltip("Target Gipsy Danger Jaeger controller. Auto-resolved if left unset.")]
+        public SimpleJaegerController targetJaeger;
+        public Animator animator;
         public float detectionRange = 400f;
-        public float attackRange = 16f;
 
-        [Header("Locomotion")]
-        public float wadeSpeed = 7.0f;
-        public float turnSpeed = 45f;
-        public float strideDistance = 7.0f;
+        [Header("Boss Phases, Health, Poise & Guard")]
+        public float maxHealth = 4200f;
+        public float currentHealth = 4200f;
+        public float maxPoise = 140f;
+        public float currentPoise = 140f;
+        public float poiseRegenRate = 22f;
+        public float poiseRegenDelay = 2.0f;
+        [Range(0f, 0.95f)]
+        public float blockDamageReduction = 0.88f;
+        public float heavyAttackDamageThreshold = 95f;
+        public float phase3DamageMultiplier = 0.80f;
+        public float phase3HealAmount = 450f;
 
-        [Header("Combat & Attacks")]
-        public float maxHealth = 500f;
-        public float currentHealth = 500f;
-        public float attackCooldown = 3.5f;
-        public float attackDamage = 25f;
+        [Header("Locomotion & Combat Ranges")]
+        [Tooltip("Leatherback walks faster than Gipsy (8.5 m/s) to apply relentless neutral pressure.")]
+        public float walkSpeed = 10.5f;
+        [Tooltip("Leatherback sprints slower than Gipsy's 22.5 m/s sprint so the player can outrun/space charges.")]
+        public float sprintSpeed = 17.5f;
+        public float empWalkSpeed = 12.2f;
+        public float empSprintSpeed = 19.0f;
+        public float backwardWalkSpeed = 8.8f;
+        public float backwardSprintSpeed = 15.5f;
+        public float strafeSpeed = 6.8f;
+        public float turnSpeed = 115f;
+        public float attackTurnSpeed = 46f;
+        public float acceleration = 4.8f;
+        public float minCombatDistance = 16.5f;
+        public float meleeAttackRange = 23.5f;
+        public float sprintMinRange = 25.0f;
 
-        [Header("Ocean Shockwave Impact")]
-        [Tooltip("Radius of Kaiju footstep waves.")]
-        public float footstepWaveRadius = 12f;
-        public float footstepWaveStrength = 1.8f;
-        public float slamWaveRadius = 22f;
-        public float slamWaveStrength = 3.0f;
+        [Header("Combat Attacks & Bio-EMP Overcharge")]
+        public float lightPunchDamage = 27.5f;
+        public float heavySlamDamage = 52.5f;
+        public float punchStrikeRadius = 14.5f;
+        public float slamStrikeRadius = 17.0f;
+        public float empBuffDuration = 18.0f;
+        public float empCooldownDuration = 20.0f;
+        public float initialEmpDelay = 5.0f;
 
-        [Header("State")]
-        public KaijuState currentState = KaijuState.Stalking;
+        [Header("Ocean Shockwaves & Wading")]
+        public float strideDistance = 7.5f;
+        public float footstepWaveRadius = 14f;
+        public float footstepWaveStrength = 0.25f;
+        public float slamWaveRadius = 26f;
+        public float slamWaveStrength = 0.35f;
+
+        [Header("Procedural Spine & Lateral Strafe IK")]
+        public bool enableProceduralIK = true;
+        public float maxTorsoLookYaw = 24f;
+        public float maxStrafePelvisYaw = 26f;
+        public float strafeStanceSpread = 0.95f;
+        public float strafeStepReach = 1.85f;
+        public float strafeStepExtraLift = 0.45f;
+
+        [Header("Runtime State")]
+        public static KaijuAI Instance { get; private set; }
+        public bool IsBaguvixActive { get; private set; }
+        public bool IsAIDisabled { get; private set; }
+
+        public AIState currentState = AIState.ChasingAndStrafing;
+        public AttackPattern activePattern = AttackPattern.None;
+
+        public int CurrentPhase { get; private set; } = 1;
+        public bool IsDead => currentState == AIState.Dead;
+        public bool IsEmpBuffed => (CurrentPhase >= 3 || Time.time < empBuffEndTime) && !IsDead;
+        public float EmpBuffRemaining => CurrentPhase >= 3 ? empBuffDuration : Mathf.Max(0f, empBuffEndTime - Time.time);
+        public float EmpBuffDuration => empBuffDuration;
+        public bool IsBlocking => currentState == AIState.Blocking;
+        public bool IsStaggered => currentState == AIState.Staggered;
+        public float PoiseRatio => maxPoise > 0f ? Mathf.Clamp01(currentPoise / maxPoise) : 0f;
+
+        public string PhaseTitleLabel
+        {
+            get
+            {
+                if (IsDead) return "THREAT ELIMINATED";
+                if (IsAIDisabled) return "LEATHERBACK // AI DISABLED";
+                if (IsBaguvixActive) return "PACIFIST KAIJU // BAGUVIX";
+                if (CurrentPhase == 3) return "PHASE III // CATEGORY IV BERSERKER";
+                if (CurrentPhase == 2) return "PHASE II // BIO-EMP OVERDRIVE";
+                return "PHASE I // APEX STALKER";
+            }
+        }
+
+        public string TacticalStatusLabel
+        {
+            get
+            {
+                if (IsDead) return "KAIJU NEUTRALIZED";
+                if (IsAIDisabled) return "AI OFFLINE // HESOYAM";
+                if (IsBaguvixActive) return "FALLBACK AI // PACIFIST";
+                if (currentState == AIState.PhaseTransition) return $"PHASE {CurrentPhase} SURGE";
+                if (IsStaggered) return "STAGGERED // GUARD BROKEN";
+                if (IsBlocking) return "ARMORED FORE-GUARD";
+                if (currentState == AIState.Retreating) return retreatWithSprint ? "EVASIVE BACK-SPRINT" : "TACTICAL RETREAT";
+                if (currentState == AIState.SizingUp) return "SIZING UP // STALKING";
+                if (IsEmpBuffed && currentAnimState == "Run") return "BIO-EMP OVERCHARGE // CHARGING";
+                if (IsEmpBuffed || currentState == AIState.EmpRoar) return "BIO-EMP OVERCHARGE";
+                if (currentState == AIState.Attacking) return hasHyperArmor ? "ARMORED COUNTER-ASSAULT" : "HEAVY ASSAULT";
+                if (currentState == AIState.ChasingAndStrafing && isStrafingInRange) return "CIRCLE STALKING";
+                return "ENGAGING";
+            }
+        }
 
         private Rigidbody rb;
-        private JaegerWaterInteraction waterInteraction;
-        private float lastAttackTime;
+        private Coroutine activeSequenceCoroutine;
+
+        private float currentBodyYaw;
+        private bool bodyYawInitialized;
+        private Vector3 desiredVelocity;
+        private string currentAnimState = "";
+        private bool hasLocomotionSpeedParam;
+        private float currentLocomotionSpeed = 1f;
+
+        private float stateTimer;
+        private float postAttackPacingTimer = 0.7f;
+        private float sizingUpCooldown = 5.0f;
+        private float empCooldownTimer;
+        private float empBuffEndTime = -100f;
+        private float lastDamageTime = -100f;
+        private float lastPlayerAttackNotifyTime = -100f;
+        private int playerSpamCount;
+        private int consecutiveStaggers;
+        private float lastStaggerTime = -100f;
+
+        private bool counterQueued;
+        private bool blockEnterFast;
+        private bool hasHyperArmor;
+        private bool retreatWithSprint;
+        private float retreatTargetDist = 28f;
+        private bool deathLoopEntered;
+        private bool hasCelebratedPlayerDefeat;
+
+        private float circleStrafeDir = 1f;
+        private float strafeSwitchTimer = 3.0f;
+        private bool isStrafingInRange;
+
         private Vector3 lastStepPos;
         private bool isLeftFoot = true;
-        private float stateTimer;
 
-        void Awake()
+        // Cached Rig Bones
+        private Transform upperTorsoBone;
+        private Transform neckBone;
+        private Transform hipL;
+        private Transform upperLegL;
+        private Transform lowerLegL;
+        private Transform ankleL;
+        private Transform hipR;
+        private Transform upperLegR;
+        private Transform lowerLegR;
+        private Transform ankleR;
+        private Transform handL;
+        private Transform handR;
+
+        // Procedural IK smoothing state
+        private float currentStrafeYaw;
+        private float currentStrafeWeight;
+        private float currentStrafeDir;
+        private float currentTorsoYaw;
+        private float currentNeckYaw;
+
+        private void Awake()
         {
+            Instance = this;
             rb = GetComponent<Rigidbody>();
             rb.freezeRotation = true;
+            rb.useGravity = false;
+            rb.constraints = RigidbodyConstraints.FreezeRotation | RigidbodyConstraints.FreezePositionY;
+
+            currentBodyYaw = transform.eulerAngles.y;
+            bodyYawInitialized = true;
             currentHealth = maxHealth;
-            waterInteraction = GetComponent<JaegerWaterInteraction>();
+            currentPoise = maxPoise;
+            CurrentPhase = 1;
+            empCooldownTimer = initialEmpDelay;
+            circleStrafeDir = Random.value > 0.5f ? 1f : -1f;
+
+            if (animator == null)
+            {
+                animator = GetComponentInChildren<Animator>();
+            }
+            if (animator != null)
+            {
+                animator.applyRootMotion = false;
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+                foreach (var p in animator.parameters)
+                {
+                    if (p.nameHash == LocomotionSpeedHash)
+                    {
+                        hasLocomotionSpeedParam = true;
+                        break;
+                    }
+                }
+            }
+
+            foreach (var smr in GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            {
+                smr.updateWhenOffscreen = true;
+            }
+
+            CacheRigBones();
         }
 
-        void Start()
+        private void OnDestroy()
         {
-            if (target == null)
-            {
-                var jaeger = GameObject.Find("Jaeger_Mech");
-                if (jaeger != null) target = jaeger.transform;
-            }
+            if (Instance == this)
+                Instance = null;
+        }
+
+        public void ActivateBaguvixCheat()
+        {
+            IsBaguvixActive = true;
+            CancelActiveSequence();
+            hasHyperArmor = false;
+            counterQueued = false;
+            blockEnterFast = false;
+            currentState = AIState.SizingUp;
+            stateTimer = Random.Range(3.0f, 5.0f);
+            circleStrafeDir = Random.value > 0.5f ? 1f : -1f;
+            Debug.Log("<color=#00e5ff><b>[KaijuAI]</b></color> BAGUVIX ACTIVATED: Kaiju hostility disabled, pacifist fallback AI engaged, damage blocked.");
+        }
+
+        public void DisableAIEntirely()
+        {
+            IsAIDisabled = true;
+            CancelActiveSequence();
+            hasHyperArmor = false;
+            counterQueued = false;
+            blockEnterFast = false;
+            isStrafingInRange = false;
+            currentState = AIState.Idle;
+            desiredVelocity = Vector3.zero;
+            SetLocomotionSpeed(1f);
+            CrossFadeState("Idle", 0.2f);
+            Debug.Log("<color=#00e5ff><b>[KaijuAI]</b></color> HESOYAM ACTIVATED: Leatherback's AI is completely disabled until level restart.");
+        }
+
+        private void Start()
+        {
+            ResolveTarget();
+            IgnorePlatformCollisions();
             lastStepPos = transform.position;
+            SetLocomotionSpeed(1f);
+            CrossFadeState("Idle", 0.05f, true);
         }
 
-        void Update()
+        private void ResolveTarget()
         {
-            if (target == null)
+            if (targetJaeger != null) return;
+            targetJaeger = FindAnyObjectByType<SimpleJaegerController>();
+        }
+
+        private void IgnorePlatformCollisions()
+        {
+            GameObject platform = GameObject.Find("Test_Platform");
+            if (platform == null) return;
+
+            var platCols = platform.GetComponentsInChildren<Collider>(true);
+            var myCols = GetComponentsInChildren<Collider>(true);
+            foreach (var myCol in myCols)
             {
-                var jaeger = GameObject.Find("Jaeger_Mech");
-                if (jaeger != null) target = jaeger.transform;
-                else return;
+                foreach (var platCol in platCols)
+                {
+                    if (myCol != null && platCol != null)
+                    {
+                        Physics.IgnoreCollision(myCol, platCol, true);
+                    }
+                }
+            }
+        }
+
+        private void CacheRigBones()
+        {
+            if (upperTorsoBone != null && ankleL != null && handR != null) return;
+
+            foreach (var t in GetComponentsInChildren<Transform>(true))
+            {
+                switch (t.name)
+                {
+                    case "UpperTorsoBone": upperTorsoBone = t; break;
+                    case "NeckBone": neckBone = t; break;
+                    case "HipBone.L": hipL = t; break;
+                    case "UpperLegBone.L": upperLegL = t; break;
+                    case "LowerLegBone.L": lowerLegL = t; break;
+                    case "AnkleBone.L": ankleL = t; break;
+                    case "HipBone.R": hipR = t; break;
+                    case "UpperLegBone.R": upperLegR = t; break;
+                    case "LowerLegBone.R": lowerLegR = t; break;
+                    case "AnkleBone.R": ankleR = t; break;
+                    case "HandBone.L": handL = t; break;
+                    case "HandBone.R": handR = t; break;
+                }
+            }
+        }
+
+        private void Update()
+        {
+            ResolveTarget();
+
+            if (PacificRimUI.MainMenuUI.IsMenuOpen)
+            {
+                desiredVelocity = Vector3.zero;
+                return;
             }
 
-            float distToTarget = Vector3.Distance(transform.position, target.position);
-
-            switch (currentState)
+            if (IsAIDisabled)
             {
-                case KaijuState.Idle:
-                    if (distToTarget <= detectionRange)
-                    {
-                        currentState = KaijuState.Stalking;
-                    }
-                    break;
-
-                case KaijuState.Stalking:
-                    WadeTowardTarget(distToTarget);
-                    if (distToTarget <= attackRange && Time.time >= lastAttackTime + attackCooldown)
-                    {
-                        StartAttack();
-                    }
-                    break;
-
-                case KaijuState.Attacking:
-                    stateTimer -= Time.deltaTime;
-                    if (stateTimer <= 0f)
-                    {
-                        currentState = KaijuState.Stalking;
-                    }
-                    break;
-
-                case KaijuState.Stunned:
-                    stateTimer -= Time.deltaTime;
-                    if (stateTimer <= 0f)
-                    {
-                        currentState = KaijuState.Stalking;
-                    }
-                    break;
+                desiredVelocity = Vector3.zero;
+                SetLocomotionSpeed(1f);
+                if (currentState != AIState.Idle)
+                {
+                    currentState = AIState.Idle;
+                    CrossFadeState("Idle", 0.2f);
+                }
+                return;
             }
 
+            if (IsDead)
+            {
+                desiredVelocity = Vector3.zero;
+                SetLocomotionSpeed(1f);
+                stateTimer -= Time.deltaTime;
+                if (!deathLoopEntered && stateTimer <= 0f)
+                {
+                    deathLoopEntered = true;
+                    CrossFadeState("DeathLoop", 0.35f);
+                }
+                return;
+            }
+
+            if (targetJaeger == null || targetJaeger.IsDead)
+            {
+                if (targetJaeger != null && targetJaeger.IsDead && !hasCelebratedPlayerDefeat)
+                {
+                    TriggerVictoryRoar();
+                    return;
+                }
+
+                if (currentState == AIState.EmpRoar)
+                {
+                    // Allow victory EMP blast animation to finish playing before dropping to idle
+                    stateTimer -= Time.deltaTime;
+                    desiredVelocity = Vector3.zero;
+                    SetLocomotionSpeed(1f);
+                    if (stateTimer <= 0f)
+                    {
+                        currentState = AIState.Idle;
+                        CrossFadeState("Idle", 0.3f);
+                    }
+                    return;
+                }
+
+                desiredVelocity = Vector3.zero;
+                SetLocomotionSpeed(1f);
+                CrossFadeState("Idle", 0.2f);
+                return;
+            }
+
+            float dt = Time.deltaTime;
+
+            if (Time.time - lastPlayerAttackNotifyTime > 2.6f)
+            {
+                playerSpamCount = 0;
+            }
+
+            if (Time.time - lastStaggerTime > 2.2f)
+            {
+                consecutiveStaggers = 0;
+            }
+
+            // Regenerate poise smoothly out of guard/stagger
+            if (currentState != AIState.Staggered && currentState != AIState.Blocking &&
+                Time.time >= lastDamageTime + poiseRegenDelay)
+            {
+                currentPoise = Mathf.Min(maxPoise, currentPoise + poiseRegenRate * dt);
+            }
+
+            if (empCooldownTimer > 0f && !IsEmpBuffed && currentState != AIState.EmpRoar)
+            {
+                empCooldownTimer -= dt;
+                if (!IsEmpBuffed)
+                {
+                    PacificRimAudio.PacificRimAudioManager.Instance?.SetKaijuEmpSparksLoop(false, transform.position);
+                }
+            }
+
+            if (postAttackPacingTimer > 0f && currentState == AIState.ChasingAndStrafing)
+            {
+                postAttackPacingTimer -= dt;
+            }
+
+            if (sizingUpCooldown > 0f)
+            {
+                sizingUpCooldown -= dt;
+            }
+
+            strafeSwitchTimer -= dt;
+            if (strafeSwitchTimer <= 0f)
+            {
+                strafeSwitchTimer = Random.Range(2.4f, 4.2f);
+                circleStrafeDir = -circleStrafeDir;
+            }
+
+            UpdateAnimatorPlaybackSpeed();
+            UpdateStateMachine(dt);
             TrackFootsteps();
         }
 
-        private void WadeTowardTarget(float distToTarget)
+        private void UpdateAnimatorPlaybackSpeed()
         {
-            Vector3 dir = (target.position - transform.position);
-            dir.y = 0f;
+            if (animator == null) return;
 
-            if (dir.sqrMagnitude > 0.01f)
+            if (currentState == AIState.Blocking && blockEnterFast)
             {
-                Quaternion targetRot = Quaternion.LookRotation(dir.normalized);
-                transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRot, turnSpeed * Time.deltaTime);
+                animator.speed = 1.75f;
             }
-
-            Vector3 moveVel = transform.forward * wadeSpeed;
-            if (waterInteraction != null && waterInteraction.IsWading)
+            else if (currentState == AIState.Staggered)
             {
-                moveVel *= waterInteraction.deepWaterSpeedMultiplier;
+                animator.speed = currentAnimState == "StaggerUp" ? 1.15f : 1.35f;
+            }
+            else if (currentState == AIState.PhaseTransition)
+            {
+                animator.speed = 1.25f;
+            }
+            else if (IsEmpBuffed)
+            {
+                animator.speed = currentState == AIState.Attacking
+                    ? (CurrentPhase == 3 ? 1.28f : 1.20f)
+                    : 1.15f;
+            }
+            else
+            {
+                animator.speed = 1.0f;
+            }
+        }
+
+        private void FixedUpdate()
+        {
+            if (rb == null) return;
+
+            if (IsAIDisabled)
+            {
+#if UNITY_6000_0_OR_NEWER
+                rb.linearVelocity = Vector3.zero;
+#else
+                rb.velocity = Vector3.zero;
+#endif
+                return;
             }
 
 #if UNITY_6000_0_OR_NEWER
-            Vector3 cur = rb.linearVelocity;
-            rb.linearVelocity = new Vector3(moveVel.x, cur.y, moveVel.z);
+            Vector3 currentVel = rb.linearVelocity;
+            Vector3 horiz = new Vector3(currentVel.x, 0f, currentVel.z);
+            Vector3 nextHoriz = Vector3.Lerp(horiz, desiredVelocity, Time.fixedDeltaTime * acceleration);
+            rb.linearVelocity = new Vector3(nextHoriz.x, 0f, nextHoriz.z);
 #else
-            Vector3 cur = rb.velocity;
-            rb.velocity = new Vector3(moveVel.x, cur.y, moveVel.z);
+            Vector3 currentVel = rb.velocity;
+            Vector3 horiz = new Vector3(currentVel.x, 0f, currentVel.z);
+            Vector3 nextHoriz = Vector3.Lerp(horiz, desiredVelocity, Time.fixedDeltaTime * acceleration);
+            rb.velocity = new Vector3(nextHoriz.x, 0f, nextHoriz.z);
 #endif
+
+            if (bodyYawInitialized)
+            {
+                Quaternion bodyRot = Quaternion.Euler(0f, currentBodyYaw, 0f);
+                rb.rotation = bodyRot;
+                rb.MoveRotation(bodyRot);
+            }
         }
 
-        private void StartAttack()
+        private void LateUpdate()
         {
-            currentState = KaijuState.Attacking;
-            stateTimer = 1.6f;
-            lastAttackTime = Time.time;
+            if (!enableProceduralIK || IsDead || IsAIDisabled || PacificRimUI.MainMenuUI.IsMenuOpen) return;
 
-            // Trigger Ocean Tidal Slam attack
-            Invoke(nameof(ExecuteOceanSlam), 0.6f);
-        }
+            CacheRigBones();
+            float dt = Time.deltaTime;
+            if (dt <= 0.0001f) return;
 
-        private void ExecuteOceanSlam()
-        {
-            Vector3 slamPoint = transform.position + transform.forward * 8.0f;
-            if (WaterSystem.Instance != null)
+            bool isLocoState = currentState == AIState.ChasingAndStrafing ||
+                               currentState == AIState.SizingUp ||
+                               currentState == AIState.Retreating;
+
+            // 1. Upper-torso & head tracking toward Gipsy
+            float targetTorsoYaw = 0f;
+            float targetNeckYaw = 0f;
+            if (targetJaeger != null && (isLocoState || currentState == AIState.Blocking))
             {
-                slamPoint.y = WaterSystem.Instance.GetWaterHeight(slamPoint);
-                WaterSystem.Instance.AddFootstepWave(slamPoint, slamWaveRadius, slamWaveStrength);
-            }
-
-            if (WaterSplashManager.Instance != null)
-            {
-                WaterSplashManager.Instance.SpawnFootstepSplash(slamPoint, 2.5f);
-            }
-            ProceduralSplash.CreateFoamRing(slamPoint, slamWaveRadius * 1.1f, 2.2f);
-
-            // Damage player if in slam zone
-            if (target != null && Vector3.Distance(slamPoint, target.position) <= slamWaveRadius * 0.8f)
-            {
-                var playerController = target.GetComponent<SimpleJaegerController>();
-                if (playerController != null)
+                Vector3 toTarget = targetJaeger.transform.position - transform.position;
+                toTarget.y = 0f;
+                if (toTarget.sqrMagnitude > 0.01f)
                 {
-                    playerController.TakeDamage(attackDamage, (target.position - transform.position).normalized * 15f);
+                    float signedAngle = Vector3.SignedAngle(transform.forward, toTarget.normalized, Vector3.up);
+                    targetTorsoYaw = Mathf.Clamp(signedAngle * 0.45f, -maxTorsoLookYaw, maxTorsoLookYaw);
+                    targetNeckYaw = Mathf.Clamp(signedAngle * 0.60f, -maxTorsoLookYaw * 1.2f, maxTorsoLookYaw * 1.2f);
                 }
             }
 
-            Debug.Log("<color=#ff2a2a><b>[Kaiju AI]</b></color> Ocean Slam Attack unleashed!");
-        }
+            currentTorsoYaw = Mathf.MoveTowards(currentTorsoYaw, targetTorsoYaw, 100f * dt);
+            currentNeckYaw = Mathf.MoveTowards(currentNeckYaw, targetNeckYaw, 150f * dt);
 
-        private void TrackFootsteps()
-        {
-            Vector3 cur = transform.position;
-            float moved = Vector3.Distance(new Vector3(cur.x, 0f, cur.z), new Vector3(lastStepPos.x, 0f, lastStepPos.z));
-
-            if (moved >= strideDistance)
+            if (Mathf.Abs(currentTorsoYaw) > 0.05f && upperTorsoBone != null)
             {
-                lastStepPos = cur;
-                isLeftFoot = !isLeftFoot;
+                upperTorsoBone.rotation = Quaternion.AngleAxis(currentTorsoYaw, transform.up) * upperTorsoBone.rotation;
+            }
+            if (Mathf.Abs(currentNeckYaw) > 0.05f && neckBone != null)
+            {
+                neckBone.rotation = Quaternion.AngleAxis(currentNeckYaw, transform.up) * neckBone.rotation;
+            }
 
-                Vector3 footPos = cur + (isLeftFoot ? -transform.right : transform.right) * 4.0f;
-                if (WaterSystem.Instance != null)
+            // 2. Lateral Strafe Pelvis Steering & 2-Bone Analytical Leg IK
+            float desiredStrafeWeight = 0f;
+            float desiredStrafeYaw = 0f;
+            float desiredStrafeDir = 0f;
+
+            if (isLocoState && desiredVelocity.sqrMagnitude > 0.5f)
+            {
+                Vector3 flatVel = new Vector3(desiredVelocity.x, 0f, desiredVelocity.z);
+                float latSpeed = Vector3.Dot(flatVel, transform.right);
+                float fwdSpeed = Vector3.Dot(flatVel, transform.forward);
+                float speedMag = flatVel.magnitude;
+
+                if (Mathf.Abs(latSpeed) > 0.35f && speedMag > 0.5f)
                 {
-                    footPos.y = WaterSystem.Instance.GetWaterHeight(footPos);
-                    WaterSystem.Instance.AddFootstepWave(footPos, footstepWaveRadius, footstepWaveStrength);
+                    float dirSign = fwdSpeed < -0.5f ? -1f : 1f;
+                    float latNorm = Mathf.Clamp(latSpeed / Mathf.Max(0.1f, strafeSpeed), -1f, 1f);
+                    float effFwd = Mathf.Max(0.42f, Mathf.Abs(fwdSpeed) / Mathf.Max(0.1f, walkSpeed));
+                    float rawAngle = Mathf.Atan2(latNorm * dirSign, effFwd) * Mathf.Rad2Deg;
+
+                    desiredStrafeYaw = Mathf.Clamp(rawAngle, -maxStrafePelvisYaw, maxStrafePelvisYaw);
+                    desiredStrafeWeight = Mathf.Clamp01(Mathf.Abs(latNorm));
+                    desiredStrafeDir = latNorm;
+                }
+            }
+
+            currentStrafeYaw = Mathf.MoveTowards(currentStrafeYaw, desiredStrafeYaw, 180f * dt);
+            currentStrafeWeight = Mathf.MoveTowards(currentStrafeWeight, desiredStrafeWeight, 5.0f * dt);
+            currentStrafeDir = Mathf.MoveTowards(currentStrafeDir, desiredStrafeDir, 6.0f * dt);
+
+            if (currentStrafeWeight > 0.001f)
+            {
+                if (Mathf.Abs(currentStrafeYaw) > 0.05f)
+                {
+                    if (hipL != null)
+                        hipL.rotation = Quaternion.AngleAxis(currentStrafeYaw * 0.6f, transform.up) * hipL.rotation;
+                    if (hipR != null)
+                        hipR.rotation = Quaternion.AngleAxis(currentStrafeYaw * 0.6f, transform.up) * hipR.rotation;
                 }
 
-                if (WaterSplashManager.Instance != null)
-                {
-                    WaterSplashManager.Instance.SpawnFootstepSplash(footPos, 1.8f);
-                }
-                ProceduralSplash.CreateFoamRing(footPos, footstepWaveRadius * 1.1f, 1.8f);
+                ApplyStrafeLegIK(upperLegL, lowerLegL, ankleL, -1f);
+                ApplyStrafeLegIK(upperLegR, lowerLegR, ankleR, 1f);
             }
         }
 
-        public void TakeDamage(float amount, Vector3 knockback)
+        private void ApplyStrafeLegIK(Transform thigh, Transform shin, Transform ankle, float sideSign)
         {
-            currentHealth -= amount;
-            Debug.Log($"<color=#ff8800><b>[Kaiju]</b></color> Hit for {amount} DMG! HP: {currentHealth}/{maxHealth}");
+            if (thigh == null || shin == null || ankle == null) return;
 
-            rb.AddForce(knockback, ForceMode.Impulse);
+            // Measured Walk AnkleBone height offset above root: min=4.49m, max=9.58m
+            float relAnkleY = ankle.position.y - transform.position.y;
+            float swingLift = Mathf.Clamp01((relAnkleY - 4.8f) / 4.2f);
+
+            Vector3 lateralSpread = transform.right * (sideSign * strafeStanceSpread * currentStrafeWeight);
+            Vector3 swingLateralReach = transform.right * (currentStrafeDir * swingLift * strafeStepReach * currentStrafeWeight);
+            Vector3 swingVertLift = Vector3.up * (swingLift * strafeStepExtraLift * currentStrafeWeight);
+            Vector3 targetPos = ankle.position + lateralSpread + swingLateralReach + swingVertLift;
+
+            Vector3 redirectedFwd = Quaternion.AngleAxis(currentStrafeYaw, transform.up) * transform.forward;
+            Vector3 poleDir = (redirectedFwd + transform.right * (sideSign * 0.22f)).normalized;
+
+            SolveTwoBoneIKWorld(thigh, shin, ankle, targetPos, poleDir);
+        }
+
+        private static void SolveTwoBoneIKWorld(Transform root, Transform mid, Transform tip, Vector3 targetPos, Vector3 poleForward)
+        {
+            Vector3 a = root.position;
+            Vector3 b = mid.position;
+            Vector3 c = tip.position;
+            Quaternion origTipRot = tip.rotation;
+
+            float l1 = Vector3.Distance(a, b);
+            float l2 = Vector3.Distance(b, c);
+            if (l1 < 0.001f || l2 < 0.001f) return;
+
+            Vector3 toTarget = targetPos - a;
+            float dist = toTarget.magnitude;
+            if (dist < 0.001f) return;
+
+            Vector3 dir = toTarget / dist;
+            float minReach = Mathf.Abs(l1 - l2) + 0.01f;
+            float maxReach = (l1 + l2) - 0.01f;
+            float clampedDist = Mathf.Clamp(dist, minReach, maxReach);
+            Vector3 clampedTarget = a + dir * clampedDist;
+
+            Vector3 poleProj = Vector3.ProjectOnPlane(poleForward, dir);
+            Vector3 poleUnit = poleProj.sqrMagnitude > 0.0001f ? poleProj.normalized : Vector3.Cross(dir, Vector3.right).normalized;
+            Vector3 animKneeDir = Vector3.ProjectOnPlane(b - a, dir);
+            Vector3 bendDir = Vector3.ProjectOnPlane(animKneeDir * 0.65f + poleUnit * (l1 * 0.35f), dir);
+            if (bendDir.sqrMagnitude < 0.0001f) bendDir = poleProj;
+            if (bendDir.sqrMagnitude < 0.0001f) return;
+            bendDir.Normalize();
+
+            float cosAngle0 = Mathf.Clamp((l1 * l1 + clampedDist * clampedDist - l2 * l2) / (2f * l1 * clampedDist), -1f, 1f);
+            float x = l1 * cosAngle0;
+            float y = Mathf.Sqrt(Mathf.Max(0f, l1 * l1 - x * x));
+            Vector3 solvedKnee = a + dir * x + bendDir * y;
+
+            Vector3 curRootToMid = b - a;
+            Vector3 newRootToMid = solvedKnee - a;
+            if (curRootToMid.sqrMagnitude > 0.0001f && newRootToMid.sqrMagnitude > 0.0001f)
+            {
+                root.rotation = Quaternion.FromToRotation(curRootToMid, newRootToMid) * root.rotation;
+            }
+
+            Vector3 bAfter = mid.position;
+            Vector3 cAfter = tip.position;
+            Vector3 curMidToTip = cAfter - bAfter;
+            Vector3 newMidToTip = clampedTarget - bAfter;
+            if (curMidToTip.sqrMagnitude > 0.0001f && newMidToTip.sqrMagnitude > 0.0001f)
+            {
+                mid.rotation = Quaternion.FromToRotation(curMidToTip, newMidToTip) * mid.rotation;
+            }
+
+            tip.rotation = origTipRot;
+        }
+
+        private void UpdateStateMachine(float dt)
+        {
+            Vector3 toTarget = targetJaeger.transform.position - transform.position;
+            toTarget.y = 0f;
+            float dist = toTarget.magnitude;
+            Vector3 dirToTarget = dist > 0.01f ? (toTarget / dist) : transform.forward;
+            float targetYaw = Mathf.Atan2(dirToTarget.x, dirToTarget.z) * Mathf.Rad2Deg;
+
+            isStrafingInRange = false;
+
+            switch (currentState)
+            {
+                case AIState.Idle:
+                    desiredVelocity = Vector3.zero;
+                    SetLocomotionSpeed(1f);
+                    CrossFadeState("Idle", 0.2f);
+                    if (dist <= detectionRange)
+                    {
+                        if (IsBaguvixActive)
+                            StartSizingUp(Random.Range(3.0f, 5.0f));
+                        else
+                            currentState = AIState.ChasingAndStrafing;
+                    }
+                    break;
+
+                case AIState.ChasingAndStrafing:
+                    RotateYawToward(targetYaw, turnSpeed, dt);
+
+                    if (IsBaguvixActive)
+                    {
+                        if (dist < 19.5f)
+                        {
+                            StartRetreat(useSprint: dist < 15.5f, duration: Random.Range(1.8f, 2.8f));
+                        }
+                        else
+                        {
+                            StartSizingUp(Random.Range(3.0f, 5.0f));
+                        }
+                        break;
+                    }
+
+                    if (empCooldownTimer <= 0f && !IsEmpBuffed && dist >= 18.0f && dist <= 140f)
+                    {
+                        StartEmpRoar();
+                        break;
+                    }
+
+                    // Anti-overlap retreat step if Gipsy crowds into chest
+                    if (dist < 15.8f)
+                    {
+                        desiredVelocity = (-dirToTarget * backwardWalkSpeed) + transform.right * (circleStrafeDir * strafeSpeed * 0.55f);
+                        SetLocomotionSpeed(-1.05f);
+                        CrossFadeState("Walk", 0.14f);
+                        isStrafingInRange = true;
+                        break;
+                    }
+
+                    // Occasionally back off & circle-stalk to size up the player like a God of War duel
+                    if (dist <= 27f && dist >= 16.5f && sizingUpCooldown <= 0f && postAttackPacingTimer <= 0.1f && Random.value < 0.40f)
+                    {
+                        StartSizingUp();
+                        break;
+                    }
+
+                    if (dist > meleeAttackRange)
+                    {
+                        bool shouldSprint = dist > sprintMinRange && (IsEmpBuffed || dist > 36f);
+                        if (shouldSprint)
+                        {
+                            float spd = IsEmpBuffed ? empSprintSpeed : sprintSpeed;
+                            desiredVelocity = transform.forward * spd;
+                            SetLocomotionSpeed(IsEmpBuffed ? 1.12f : 1.0f);
+                            CrossFadeState("Run", 0.16f);
+                        }
+                        else
+                        {
+                            float spd = IsEmpBuffed ? empWalkSpeed : walkSpeed;
+                            desiredVelocity = (transform.forward + transform.right * (circleStrafeDir * 0.28f)).normalized * spd;
+                            SetLocomotionSpeed(IsEmpBuffed ? 1.15f : 1.0f);
+                            CrossFadeState("Walk", 0.16f);
+                        }
+                    }
+                    else
+                    {
+                        if (postAttackPacingTimer > 0f)
+                        {
+                            float spd = strafeSpeed * (IsEmpBuffed ? 1.20f : 1.0f);
+                            float radialAdjust = dist < minCombatDistance ? -0.60f : (dist > meleeAttackRange - 1.5f ? 0.40f : 0f);
+                            desiredVelocity = (transform.right * circleStrafeDir + transform.forward * radialAdjust).normalized * spd;
+                            SetLocomotionSpeed(radialAdjust < -0.1f ? -0.9f : 1.0f);
+                            CrossFadeState("Walk", 0.16f);
+                            isStrafingInRange = true;
+                        }
+                        else
+                        {
+                            StartMeleeAttack(dist);
+                        }
+                    }
+                    break;
+
+                case AIState.SizingUp:
+                    RotateYawToward(targetYaw, turnSpeed * 1.1f, dt);
+                    stateTimer -= dt;
+                    isStrafingInRange = true;
+
+                    float targetCircleDist = Mathf.Clamp(dist, 21f, 29f);
+                    float radialBias = 0f;
+                    if (dist < 20.5f) radialBias = -0.65f;
+                    else if (dist > 30f) radialBias = 0.55f;
+
+                    float circleSpd = strafeSpeed * (IsEmpBuffed ? 1.25f : 1.05f);
+                    desiredVelocity = (transform.right * circleStrafeDir + transform.forward * radialBias).normalized * circleSpd;
+                    SetLocomotionSpeed(radialBias < -0.15f ? -1.0f : 1.05f);
+                    CrossFadeState("Walk", 0.16f);
+
+                    if (IsBaguvixActive)
+                    {
+                        // Pacifist fallback: if player gets close, retreat instead of attacking
+                        if (dist < 18.5f)
+                        {
+                            StartRetreat(useSprint: dist < 15.0f, duration: Random.Range(1.8f, 2.8f));
+                        }
+                        else if (stateTimer <= 0f)
+                        {
+                            circleStrafeDir = -circleStrafeDir;
+                            stateTimer = Random.Range(2.5f, 4.5f);
+                        }
+                        break;
+                    }
+
+                    // Punish reckless rush or explode out of the stalk into a charging Slam
+                    if (dist < 17.5f)
+                    {
+                        StartAttackPattern(Random.value < 0.55f ? AttackPattern.HeavySlam : AttackPattern.DoubleHookCombo);
+                    }
+                    else if (stateTimer <= 0f)
+                    {
+                        sizingUpCooldown = Random.Range(4.5f, 7.5f);
+                        if (dist > 22.5f)
+                        {
+                            StartAttackPattern(AttackPattern.SprintChargeSlam);
+                        }
+                        else
+                        {
+                            currentState = AIState.ChasingAndStrafing;
+                            postAttackPacingTimer = 0f;
+                        }
+                    }
+                    break;
+
+                case AIState.Retreating:
+                    RotateYawToward(targetYaw, turnSpeed * 1.15f, dt);
+                    stateTimer -= dt;
+
+                    float backSpd = retreatWithSprint ? backwardSprintSpeed : backwardWalkSpeed;
+                    desiredVelocity = (-dirToTarget * backSpd) + transform.right * (circleStrafeDir * strafeSpeed * 0.35f);
+                    SetLocomotionSpeed(retreatWithSprint ? -1.18f : -1.02f);
+                    CrossFadeState(retreatWithSprint ? "Run" : "Walk", 0.14f);
+
+                    if (stateTimer <= 0f || dist >= retreatTargetDist)
+                    {
+                        if (IsBaguvixActive)
+                        {
+                            StartSizingUp(Random.Range(2.5f, 4.0f));
+                        }
+                        else if (CurrentPhase >= 2 && Random.value < 0.50f)
+                        {
+                            StartAttackPattern(AttackPattern.SprintChargeSlam);
+                        }
+                        else
+                        {
+                            StartSizingUp(Random.Range(1.4f, 2.3f));
+                        }
+                    }
+                    break;
+
+                case AIState.EmpRoar:
+                    RotateYawToward(targetYaw, attackTurnSpeed * 0.6f, dt);
+                    desiredVelocity = Vector3.zero;
+                    SetLocomotionSpeed(1f);
+                    stateTimer -= dt;
+                    if (stateTimer <= 0f)
+                    {
+                        currentState = AIState.ChasingAndStrafing;
+                    }
+                    break;
+
+                case AIState.PhaseTransition:
+                    RotateYawToward(targetYaw, turnSpeed, dt);
+                    stateTimer -= dt;
+                    break;
+
+                case AIState.Attacking:
+                    if (IsBaguvixActive)
+                    {
+                        CancelActiveSequence();
+                        StartSizingUp(Random.Range(2.5f, 4.0f));
+                        break;
+                    }
+
+                    RotateYawToward(targetYaw, activePattern == AttackPattern.SprintChargeSlam ? turnSpeed : attackTurnSpeed, dt);
+                    if (activePattern != AttackPattern.SprintChargeSlam)
+                    {
+                        float lungeSpeed = (dist > minCombatDistance + 0.6f) ? walkSpeed * 0.32f : 0f;
+                        desiredVelocity = transform.forward * lungeSpeed;
+                    }
+                    break;
+
+                case AIState.Blocking:
+                    RotateYawToward(targetYaw, turnSpeed * 0.85f, dt);
+                    desiredVelocity = dist < minCombatDistance ? (-dirToTarget * 3.0f) : Vector3.zero;
+                    SetLocomotionSpeed(dist < minCombatDistance ? -0.8f : 1f);
+                    stateTimer -= dt;
+                    if (stateTimer <= 0f)
+                    {
+                        blockEnterFast = false;
+                        if (IsBaguvixActive)
+                        {
+                            counterQueued = false;
+                            StartRetreat(false, 1.5f);
+                        }
+                        else if (counterQueued)
+                        {
+                            counterQueued = false;
+                            StartCounterAttack();
+                        }
+                        else
+                        {
+                            currentState = AIState.ChasingAndStrafing;
+                            postAttackPacingTimer = 0.25f;
+                        }
+                    }
+                    break;
+
+                case AIState.Staggered:
+                    desiredVelocity = Vector3.zero;
+                    SetLocomotionSpeed(1f);
+                    stateTimer -= dt;
+                    if (stateTimer <= 0f)
+                    {
+                        currentPoise = maxPoise;
+                        if (IsBaguvixActive)
+                        {
+                            StartSizingUp(Random.Range(2.5f, 4.0f));
+                        }
+                        else if (consecutiveStaggers >= 2 && Random.value < 0.55f)
+                        {
+                            consecutiveStaggers = 0;
+                            StartRetreat(useSprint: true, duration: Random.Range(1.0f, 1.4f));
+                        }
+                        else
+                        {
+                            currentState = AIState.ChasingAndStrafing;
+                            postAttackPacingTimer = 0.35f;
+                        }
+                    }
+                    break;
+            }
+        }
+
+        private void SetLocomotionSpeed(float spd)
+        {
+            if (Mathf.Approximately(currentLocomotionSpeed, spd)) return;
+            currentLocomotionSpeed = spd;
+            if (animator != null && hasLocomotionSpeedParam)
+            {
+                animator.SetFloat(LocomotionSpeedHash, spd);
+            }
+        }
+
+        private void RotateYawToward(float targetYaw, float maxDegPerSec, float dt)
+        {
+            currentBodyYaw = Mathf.MoveTowardsAngle(currentBodyYaw, targetYaw, maxDegPerSec * dt);
+            transform.rotation = Quaternion.Euler(0f, currentBodyYaw, 0f);
+        }
+
+        private void CrossFadeState(string stateName, float fadeDuration = 0.16f, bool forceRestart = false)
+        {
+            if (animator == null) return;
+            if (!forceRestart && currentAnimState == stateName) return;
+
+            currentAnimState = stateName;
+            animator.CrossFadeInFixedTime(stateName, fadeDuration, 0, 0f);
+        }
+
+        private void CancelActiveSequence()
+        {
+            if (activeSequenceCoroutine != null)
+            {
+                StopCoroutine(activeSequenceCoroutine);
+                activeSequenceCoroutine = null;
+            }
+            activePattern = AttackPattern.None;
+            hasHyperArmor = false;
+        }
+
+        private void StartSizingUp(float customDuration = -1f)
+        {
+            CancelActiveSequence();
+            currentState = AIState.SizingUp;
+            stateTimer = customDuration > 0f ? customDuration : Random.Range(1.6f, 2.8f);
+            circleStrafeDir = Random.value > 0.5f ? 1f : -1f;
+        }
+
+        private void StartRetreat(bool useSprint, float duration)
+        {
+            CancelActiveSequence();
+            currentState = AIState.Retreating;
+            retreatWithSprint = useSprint;
+            stateTimer = duration;
+            retreatTargetDist = useSprint ? Random.Range(28f, 35f) : Random.Range(24f, 29f);
+        }
+
+        public void TriggerVictoryRoar()
+        {
+            if (IsDead) return;
+            hasCelebratedPlayerDefeat = true;
+            CancelActiveSequence();
+            currentState = AIState.EmpRoar;
+            stateTimer = EmpClipLength + 1.5f;
+            desiredVelocity = Vector3.zero;
+            hasHyperArmor = true;
+
+            SetLocomotionSpeed(1f);
+            CrossFadeState("EMP", 0.16f, true);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuEmpRoar(transform.position + Vector3.up * 14f);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayEmpChargeUp(transform.position + Vector3.up * 12f);
+            activeSequenceCoroutine = StartCoroutine(EmpShockwaveRoutine());
+            Debug.Log("<color=#00e5ff><b>[Leatherback Boss]</b></color> JAEGER DESTROYED! Unleashing Victory BIO-EMP Blast!");
+        }
+
+        private void StartEmpRoar()
+        {
+            if (IsBaguvixActive)
+            {
+                StartSizingUp(Random.Range(2.5f, 4.0f));
+                return;
+            }
+
+            CancelActiveSequence();
+            currentState = AIState.EmpRoar;
+            stateTimer = EmpClipLength;
+            empCooldownTimer = empCooldownDuration;
+            desiredVelocity = Vector3.zero;
+            hasHyperArmor = true;
+
+            SetLocomotionSpeed(1f);
+            CrossFadeState("EMP", 0.16f, true);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuEmpRoar(transform.position + Vector3.up * 14f);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayEmpChargeUp(transform.position + Vector3.up * 12f);
+            activeSequenceCoroutine = StartCoroutine(EmpShockwaveRoutine());
+            Debug.Log("<color=#00e5ff><b>[Leatherback Boss]</b></color> Initiating BIO-EMP Roar & Overcharge!");
+        }
+
+        private IEnumerator EmpShockwaveRoutine()
+        {
+            yield return new WaitForSeconds(0.95f);
+            if (IsDead) yield break;
+
+            empBuffEndTime = Time.time + empBuffDuration;
+            Vector3 center = transform.position + transform.forward * 4f;
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayEmpDischargeBlast(center + Vector3.up * 10f);
+            PacificRimAudio.PacificRimAudioManager.Instance?.SetKaijuEmpSparksLoop(true, transform.position + Vector3.up * 14f);
+            EmitOceanImpact(center, transform.forward, 28f, 0.25f, 3.2f, true, 1.4f);
+
+            Camera cam = Camera.main;
+            if (cam != null)
+            {
+                var shaker = cam.GetComponent<PacificRimCameraShake>();
+                if (shaker != null) shaker.TriggerTurbineOverchargeFeedback();
+            }
+        }
+
+        private void StartPhaseTransition(int targetPhase)
+        {
+            CancelActiveSequence();
+            CurrentPhase = targetPhase;
+            currentState = AIState.PhaseTransition;
+            hasHyperArmor = true;
+            consecutiveStaggers = 0;
+            currentPoise = maxPoise;
+
+            if (targetPhase == 3)
+            {
+                currentHealth = Mathf.Min(maxHealth, currentHealth + phase3HealAmount);
+                empBuffEndTime = Time.time + 999f;
+            }
+            else
+            {
+                empBuffEndTime = Time.time + empBuffDuration;
+            }
+
+            stateTimer = 1.0f + (EmpClipLength * 0.8f);
+            activeSequenceCoroutine = StartCoroutine(PhaseTransitionRoutine(targetPhase));
+            Debug.Log($"<color=#ff3333><b>[LEATHERBACK PHASE {targetPhase}]</b></color> Phase transition triggered!");
+        }
+
+        private IEnumerator PhaseTransitionRoutine(int phase)
+        {
+            // Phase disengage: rapid backward sprint to reset range
+            retreatWithSprint = true;
+            SetLocomotionSpeed(-1.22f);
+            CrossFadeState("Run", 0.12f, true);
+
+            float backElapsed = 0f;
+            while (backElapsed < 0.95f && currentState == AIState.PhaseTransition)
+            {
+                desiredVelocity = -transform.forward * (backwardSprintSpeed * 1.1f);
+                backElapsed += Time.deltaTime;
+                yield return null;
+            }
+
+            if (IsDead || currentState != AIState.PhaseTransition) yield break;
+
+            desiredVelocity = Vector3.zero;
+            SetLocomotionSpeed(1f);
+            CrossFadeState("EMP", 0.14f, true);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuEmpRoar(transform.position + Vector3.up * 14f);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayEmpChargeUp(transform.position + Vector3.up * 12f);
+
+            yield return new WaitForSeconds(0.75f);
+            if (IsDead || currentState != AIState.PhaseTransition) yield break;
+
+            Vector3 pulsePos = transform.position + transform.forward * 4f;
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayEmpDischargeBlast(pulsePos + Vector3.up * 10f);
+            PacificRimAudio.PacificRimAudioManager.Instance?.SetKaijuEmpSparksLoop(true, transform.position + Vector3.up * 14f);
+            EmitOceanImpact(pulsePos, Vector3.up, 34f, 0.35f, 3.4f, true, 1.8f);
+            WaterSplashManager.Instance?.SpawnCombatSparks(pulsePos + Vector3.up * 12f, Vector3.up, false, true, true);
+
+            yield return new WaitForSeconds(EmpClipLength * 0.55f);
+            if (IsDead || currentState != AIState.PhaseTransition) yield break;
+
+            hasHyperArmor = false;
+            if (phase >= 2)
+            {
+                StartAttackPattern(AttackPattern.SprintChargeSlam);
+            }
+            else
+            {
+                currentState = AIState.ChasingAndStrafing;
+            }
+        }
+
+        /// <summary>
+        /// Called by SimpleJaegerController as soon as the player starts an attack swing so Leatherback
+        /// can anticipate, raise an armored fore-guard, and punish button-mashing.
+        /// </summary>
+        public void NotifyPlayerAttackStarted(int attackVariant, bool isHeavy)
+        {
+            if (IsDead || IsAIDisabled || currentState == AIState.PhaseTransition || currentState == AIState.EmpRoar) return;
+            if (currentState == AIState.Blocking || currentState == AIState.Staggered) return;
+            if (targetJaeger == null || targetJaeger.IsDead) return;
+
+            if (IsBaguvixActive)
+            {
+                // When player attacks in baguvix mode, kaiju simply retreats or steps back peacefully
+                if (currentState != AIState.Retreating)
+                {
+                    StartRetreat(useSprint: true, duration: Random.Range(1.5f, 2.5f));
+                }
+                return;
+            }
+
+            float dist = Vector3.Distance(
+                new Vector3(transform.position.x, 0f, transform.position.z),
+                new Vector3(targetJaeger.transform.position.x, 0f, targetJaeger.transform.position.z));
+
+            if (Time.time - lastPlayerAttackNotifyTime <= 2.6f)
+            {
+                playerSpamCount++;
+            }
+            else
+            {
+                playerSpamCount = 1;
+            }
+            lastPlayerAttackNotifyTime = Time.time;
+
+            if (dist > 26.5f) return;
+
+            bool canAnticipate = currentState == AIState.ChasingAndStrafing ||
+                                 currentState == AIState.SizingUp ||
+                                 currentState == AIState.Retreating;
+            if (!canAnticipate) return;
+
+            float baseChance = CurrentPhase == 1 ? 0.38f : (CurrentPhase == 2 ? 0.52f : 0.68f);
+            float spamBonus = Mathf.Max(0, playerSpamCount - 1) * 0.26f;
+            float blockChance = Mathf.Min(0.95f, baseChance + spamBonus);
+
+            if (playerSpamCount >= 4 || Random.value < blockChance)
+            {
+                StartBlock(fastReaction: true);
+            }
+        }
+
+        private void StartMeleeAttack(float distToTarget)
+        {
+            if (IsBaguvixActive)
+            {
+                StartSizingUp(Random.Range(2.5f, 4.0f));
+                return;
+            }
+
+            AttackPattern chosen;
+            float roll = Random.value;
+
+            if (targetJaeger != null && targetJaeger.isBlocking)
+            {
+                chosen = roll < 0.60f ? AttackPattern.HeavySlam : (CurrentPhase >= 2 ? AttackPattern.TripleBrawlerCombo : AttackPattern.DoubleHookCombo);
+            }
+            else if (CurrentPhase >= 2)
+            {
+                if (roll < 0.22f) chosen = AttackPattern.RightHook;
+                else if (roll < 0.45f) chosen = AttackPattern.DoubleHookCombo;
+                else if (roll < 0.78f) chosen = AttackPattern.TripleBrawlerCombo;
+                else chosen = AttackPattern.HeavySlam;
+            }
+            else
+            {
+                if (roll < 0.22f) chosen = AttackPattern.LeftHook;
+                else if (roll < 0.44f) chosen = AttackPattern.RightHook;
+                else if (roll < 0.76f) chosen = AttackPattern.DoubleHookCombo;
+                else chosen = AttackPattern.HeavySlam;
+            }
+
+            StartAttackPattern(chosen);
+        }
+
+        private void StartCounterAttack()
+        {
+            if (IsBaguvixActive)
+            {
+                StartRetreat(false, 1.5f);
+                return;
+            }
+
+            AttackPattern counter;
+            float r = Random.value;
+            if (CurrentPhase >= 2 && r < 0.40f) counter = AttackPattern.TripleBrawlerCombo;
+            else if (r < 0.72f) counter = AttackPattern.HeavySlam;
+            else counter = AttackPattern.RightHook;
+
+            StartAttackPattern(counter, hyperArmored: true);
+        }
+
+        private void StartAttackPattern(AttackPattern pattern, bool hyperArmored = false)
+        {
+            if (IsBaguvixActive)
+            {
+                StartSizingUp(Random.Range(2.5f, 4.0f));
+                return;
+            }
+
+            CancelActiveSequence();
+            currentState = AIState.Attacking;
+            activePattern = pattern;
+            hasHyperArmor = hyperArmored || pattern == AttackPattern.HeavySlam || pattern == AttackPattern.SprintChargeSlam;
+            SetLocomotionSpeed(1f);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuAttackGrunt(transform.position + Vector3.up * 14f);
+            activeSequenceCoroutine = StartCoroutine(ExecuteAttackSequence(pattern));
+        }
+
+        private IEnumerator ExecuteAttackSequence(AttackPattern pattern)
+        {
+            float spdScale = IsEmpBuffed ? (CurrentPhase == 3 ? 1.28f : 1.20f) : 1.0f;
+
+            switch (pattern)
+            {
+                case AttackPattern.LeftHook:
+                    CrossFadeState("PunchLeft", 0.12f, true);
+                    yield return new WaitForSeconds(0.867f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(handL, transform.position + transform.forward * 12f + Vector3.up * 12f, lightPunchDamage, punchStrikeRadius, false, 20f);
+                    yield return new WaitForSeconds(Mathf.Max(0.05f, (PunchClipLength - 0.867f) / spdScale));
+                    break;
+
+                case AttackPattern.RightHook:
+                    CrossFadeState("PunchRight", 0.12f, true);
+                    yield return new WaitForSeconds(0.767f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(handR, transform.position + transform.forward * 12f + Vector3.up * 12f, lightPunchDamage, punchStrikeRadius, false, 20f);
+                    yield return new WaitForSeconds(Mathf.Max(0.05f, (PunchClipLength - 0.767f) / spdScale));
+                    break;
+
+                case AttackPattern.DoubleHookCombo:
+                    CrossFadeState("PunchLeft", 0.12f, true);
+                    yield return new WaitForSeconds(0.867f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(handL, transform.position + transform.forward * 12f + Vector3.up * 12f, lightPunchDamage * 0.85f, punchStrikeRadius, false, 14f);
+
+                    yield return new WaitForSeconds(0.12f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+
+                    CrossFadeState("PunchRight", 0.10f, true);
+                    yield return new WaitForSeconds(0.767f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(handR, transform.position + transform.forward * 12f + Vector3.up * 12f, lightPunchDamage, punchStrikeRadius, false, 24f);
+                    yield return new WaitForSeconds(Mathf.Max(0.05f, (PunchClipLength - 0.767f) / spdScale));
+                    break;
+
+                case AttackPattern.TripleBrawlerCombo:
+                    CrossFadeState("PunchLeft", 0.12f, true);
+                    yield return new WaitForSeconds(0.867f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(handL, transform.position + transform.forward * 12f + Vector3.up * 12f, lightPunchDamage * 0.80f, punchStrikeRadius, false, 14f);
+
+                    yield return new WaitForSeconds(0.12f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    CrossFadeState("PunchRight", 0.10f, true);
+                    yield return new WaitForSeconds(0.767f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(handR, transform.position + transform.forward * 12f + Vector3.up * 12f, lightPunchDamage * 0.90f, punchStrikeRadius, false, 18f);
+
+                    yield return new WaitForSeconds(0.14f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    hasHyperArmor = true;
+                    CrossFadeState("Slam", 0.12f, true);
+                    yield return new WaitForSeconds(1.033f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(null, GetSlamCenter(), heavySlamDamage, slamStrikeRadius, true, 34f);
+                    yield return new WaitForSeconds(Mathf.Max(0.05f, (SlamClipLength - 1.033f) / spdScale));
+                    break;
+
+                case AttackPattern.HeavySlam:
+                    CrossFadeState("Slam", 0.14f, true);
+                    yield return new WaitForSeconds(1.033f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(null, GetSlamCenter(), heavySlamDamage, slamStrikeRadius, true, 34f);
+                    yield return new WaitForSeconds(Mathf.Max(0.05f, (SlamClipLength - 1.033f) / spdScale));
+                    break;
+
+                case AttackPattern.SprintChargeSlam:
+                    SetLocomotionSpeed(IsEmpBuffed ? 1.15f : 1.05f);
+                    CrossFadeState("Run", 0.14f, true);
+                    float chargeElapsed = 0f;
+                    while (chargeElapsed < 1.6f && currentState == AIState.Attacking && targetJaeger != null)
+                    {
+                        float d = Vector3.Distance(
+                            new Vector3(transform.position.x, 0f, transform.position.z),
+                            new Vector3(targetJaeger.transform.position.x, 0f, targetJaeger.transform.position.z));
+                        desiredVelocity = transform.forward * (IsEmpBuffed ? empSprintSpeed : sprintSpeed);
+                        if (d <= 22.5f) break;
+                        chargeElapsed += Time.deltaTime;
+                        yield return null;
+                    }
+                    if (currentState != AIState.Attacking) yield break;
+
+                    SetLocomotionSpeed(1f);
+                    desiredVelocity = transform.forward * (walkSpeed * 0.45f);
+                    CrossFadeState("Slam", 0.12f, true);
+                    yield return new WaitForSeconds(1.033f / spdScale);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(null, GetSlamCenter(), heavySlamDamage * 1.10f, slamStrikeRadius, true, 38f);
+                    yield return new WaitForSeconds(Mathf.Max(0.05f, (SlamClipLength - 1.033f) / spdScale));
+                    break;
+            }
+
+            if (currentState == AIState.Attacking)
+            {
+                activePattern = AttackPattern.None;
+                hasHyperArmor = false;
+                if (Random.value < 0.45f)
+                {
+                    StartRetreat(useSprint: CurrentPhase >= 2 && Random.value < 0.55f, duration: Random.Range(1.0f, 1.55f));
+                }
+                else
+                {
+                    currentState = AIState.ChasingAndStrafing;
+                    postAttackPacingTimer = IsEmpBuffed ? Random.Range(0.55f, 0.95f) : Random.Range(0.95f, 1.55f);
+                    circleStrafeDir = Random.value > 0.5f ? 1f : -1f;
+                }
+            }
+        }
+
+        private Vector3 GetSlamCenter()
+        {
+            if (handL != null && handR != null)
+            {
+                return (handL.position + handR.position) * 0.5f;
+            }
+            return transform.position + transform.forward * 12.5f + Vector3.up * 8f;
+        }
+
+        private void ExecuteStrikeImpact(Transform handBone, Vector3 fallbackPos, float damage, float strikeRadius, bool isHeavy, float knockbackImpulse)
+        {
+            Vector3 impactPos = handBone != null ? handBone.position : fallbackPos;
+            if (isHeavy)
+            {
+                PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuSlamImpact(impactPos);
+            }
+            EmitOceanImpact(impactPos, transform.forward, isHeavy ? slamWaveRadius : 16f, isHeavy ? slamWaveStrength : 0.22f, isHeavy ? 2.6f : 1.4f, isHeavy, isHeavy ? 1.5f : 0.8f);
+
+            if (targetJaeger == null || targetJaeger.IsDead) return;
+
+            Vector3 jaegerChest = targetJaeger.transform.position + Vector3.up * 14f;
+            float handDist = Vector3.Distance(impactPos, jaegerChest);
+
+            Vector3 flatToJaeger = targetJaeger.transform.position - transform.position;
+            flatToJaeger.y = 0f;
+            float rootDist = flatToJaeger.magnitude;
+            float fwdDot = rootDist > 0.01f ? Vector3.Dot(transform.forward, flatToJaeger / rootDist) : 1f;
+
+            bool inStrikeZone = (handDist <= strikeRadius || rootDist <= meleeAttackRange + (isHeavy ? 2.5f : 1.5f)) && fwdDot >= 0.35f;
+            if (inStrikeZone)
+            {
+                Vector3 kbDir = rootDist > 0.01f ? (flatToJaeger / rootDist) : transform.forward;
+                float phaseDamageMult = CurrentPhase == 3 ? 1.15f : 1.0f;
+                targetJaeger.TakeDamage(damage * phaseDamageMult, kbDir * knockbackImpulse, isHeavy);
+            }
+        }
+
+        private void StartBlock(bool fastReaction)
+        {
+            CancelActiveSequence();
+            currentState = AIState.Blocking;
+            blockEnterFast = fastReaction;
+            stateTimer = Random.Range(1.35f, 1.95f);
+            counterQueued = false;
+            desiredVelocity = Vector3.zero;
+            SetLocomotionSpeed(1f);
+            CrossFadeState("BlockEnter", fastReaction ? 0.06f : 0.12f, true);
+        }
+
+        private void TriggerStagger(string staggerState, float duration)
+        {
+            CancelActiveSequence();
+            currentState = AIState.Staggered;
+            stateTimer = duration;
+            counterQueued = false;
+            desiredVelocity = Vector3.zero;
+            SetLocomotionSpeed(1f);
+            CrossFadeState(staggerState, 0.08f, true);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuStaggerPain(transform.position + Vector3.up * 14f);
+        }
+
+        public void TakeDamage(float amount, Vector3 knockback, int attackVariant = 0, Vector3 hitPoint = default)
+        {
+            if (IsDead) return;
+
+            if (IsBaguvixActive)
+            {
+                // Baguvix pacifist & invulnerability: spawn defensive sparks feedback, but zero damage taken and never staggered
+                Vector3 sparkPoint = hitPoint.sqrMagnitude > 0.01f
+                    ? hitPoint
+                    : (transform.position + transform.forward * 10.5f + Vector3.up * 15.5f);
+                WaterSplashManager.Instance?.SpawnCombatSparks(sparkPoint, -transform.forward, isBlocked: true, isHeavy: false, isKaijuTarget: true);
+                return;
+            }
+
+            bool isHeavyHit = amount >= heavyAttackDamageThreshold || attackVariant == 4 || attackVariant == 5;
+            bool isBlocked = currentState == AIState.Blocking && !isHeavyHit;
+
+            Vector3 sparkPos = hitPoint.sqrMagnitude > 0.01f
+                ? hitPoint
+                : (transform.position + transform.forward * 10.5f + Vector3.up * 15.5f);
+            WaterSplashManager.Instance?.SpawnCombatSparks(sparkPos, -transform.forward, isBlocked, isHeavyHit, isKaijuTarget: true);
+
+            lastDamageTime = Time.time;
+
+            if (currentState == AIState.Blocking)
+            {
+                if (isHeavyHit)
+                {
+                    Debug.Log($"<color=#ffaa00><b>[Leatherback GUARD BROKEN!]</b></color> Heavy strike shattered Leatherback's guard for {amount:F0} DMG!");
+                    ApplyHealthReduction(amount, knockback * 0.75f);
+                    if (!IsDead && currentState != AIState.PhaseTransition)
+                    {
+                        consecutiveStaggers = 0;
+                        TriggerStagger("StaggerUp", StaggerUpClipLength / 1.15f);
+                    }
+                    return;
+                }
+
+                float blockedDmg = amount * (1f - Mathf.Clamp01(blockDamageReduction));
+                ApplyHealthReduction(blockedDmg, knockback * 0.25f);
+                counterQueued = true;
+                stateTimer = Mathf.Min(stateTimer, 0.32f);
+
+                Debug.Log($"<color=#ffaa00><b>[Leatherback BLOCKED]</b></color> Absorbed {amount - blockedDmg:F0} DMG! Armored counter incoming!");
+                return;
+            }
+
+            float finalDmg = CurrentPhase == 3 ? (amount * phase3DamageMultiplier) : amount;
+            ApplyHealthReduction(finalDmg, knockback * 0.45f);
+
+            if (IsDead || currentState == AIState.PhaseTransition) return;
+
+            // Hyper-armor attacks cannot be interrupted mid-swing
+            if (hasHyperArmor)
+            {
+                return;
+            }
+
+            // Directional Stagger Resolution:
+            // Variant 1 (Right Hook) -> StaggerRight
+            // Variant 2 (Left Hook) -> StaggerLeft
+            // Variant 3 (Uppercut) / 4 / 5 (Heavy) -> StaggerUp
+            string targetStagger;
+            float staggerDuration;
+            if (attackVariant == 3 || attackVariant == 4 || attackVariant == 5 || isHeavyHit)
+            {
+                targetStagger = "StaggerUp";
+                staggerDuration = StaggerUpClipLength / 1.15f;
+            }
+            else if (attackVariant == 1)
+            {
+                targetStagger = "StaggerRight";
+                staggerDuration = 1.05f;
+            }
+            else if (attackVariant == 2)
+            {
+                targetStagger = "StaggerLeft";
+                staggerDuration = 1.05f;
+            }
+            else
+            {
+                float sideDot = knockback.sqrMagnitude > 0.01f ? Vector3.Dot(knockback.normalized, transform.right) : 0f;
+                targetStagger = sideDot >= 0f ? "StaggerRight" : "StaggerLeft";
+                staggerDuration = StaggerSideClipLength / 1.35f;
+            }
+
+            if (Time.time - lastStaggerTime > 2.2f)
+            {
+                consecutiveStaggers = 0;
+            }
+
+            bool isUppercutFinisher = targetStagger == "StaggerUp" && consecutiveStaggers == 2;
+            consecutiveStaggers++;
+            lastStaggerTime = Time.time;
+
+            // Combo-Breaker: allow full 1->2->3 (Right -> Left -> Uppercut) chain, then punish excessive stunlocking
+            if (consecutiveStaggers >= 3 && !isUppercutFinisher)
+            {
+                consecutiveStaggers = 0;
+                if (Random.value < 0.65f)
+                {
+                    StartBlock(fastReaction: true);
+                }
+                else
+                {
+                    StartRetreat(useSprint: true, duration: 1.25f);
+                }
+                return;
+            }
+
+            TriggerStagger(targetStagger, staggerDuration);
+        }
+
+        private void ApplyHealthReduction(float dmg, Vector3 impulse)
+        {
+            currentHealth = Mathf.Max(0f, currentHealth - dmg);
+            if (rb != null) rb.AddForce(impulse, ForceMode.Impulse);
+
+            Debug.Log($"<color=#ff8800><b>[Leatherback Boss P{CurrentPhase}]</b></color> Hit for {dmg:F0} DMG! HP: {currentHealth:F0}/{maxHealth:F0}");
 
             if (currentHealth <= 0f)
             {
                 Die();
+                return;
             }
-            else
+
+            if (CurrentPhase == 1 && currentHealth <= maxHealth * 0.65f)
             {
-                currentState = KaijuState.Stunned;
-                stateTimer = 0.8f;
+                currentHealth = Mathf.Max(currentHealth, maxHealth * 0.65f);
+                StartPhaseTransition(2);
+            }
+            else if (CurrentPhase == 2 && currentHealth <= maxHealth * 0.30f)
+            {
+                currentHealth = Mathf.Max(currentHealth, maxHealth * 0.28f);
+                StartPhaseTransition(3);
             }
         }
 
         private void Die()
         {
-            Debug.Log("<color=#00e5ff><b>[Kaiju DEFEATED!]</b></color> Kaiju collapses into the ocean!");
+            CancelActiveSequence();
+            currentHealth = 0f;
+            currentState = AIState.Dead;
+            deathLoopEntered = false;
+            stateTimer = DeathClipLength;
+            desiredVelocity = Vector3.zero;
+            SetLocomotionSpeed(1f);
+            if (animator != null) animator.speed = 1.0f;
+
+            CrossFadeState("Death", 0.18f, true);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuDeathCollapse(transform.position + Vector3.up * 10f);
+            StartCoroutine(DeathSplashRoutine());
+            Debug.Log("<color=#00e5ff><b>[KAIJU NEUTRALIZED]</b></color> Leatherback collapses into the Pacific!");
+        }
+
+        private IEnumerator DeathSplashRoutine()
+        {
+            yield return new WaitForSeconds(1.8f);
+            EmitOceanImpact(transform.position + transform.forward * 4f, Vector3.up, 32f, 0.38f, 3.5f, true, 1.8f);
+        }
+
+        private void TrackFootsteps()
+        {
+            if (currentState != AIState.ChasingAndStrafing &&
+                currentState != AIState.SizingUp &&
+                currentState != AIState.Retreating)
+            {
+                return;
+            }
+
+            Vector3 cur = transform.position;
+            float moved = Vector3.Distance(new Vector3(cur.x, 0f, cur.z), new Vector3(lastStepPos.x, 0f, lastStepPos.z));
+            if (moved >= strideDistance)
+            {
+                lastStepPos = cur;
+                isLeftFoot = !isLeftFoot;
+
+                Vector3 footPos = cur + (isLeftFoot ? -transform.right : transform.right) * 4.5f;
+                PacificRimAudio.PacificRimAudioManager.Instance?.PlayOceanFootstep(footPos, (currentState == AIState.Attacking || CurrentPhase >= 2) ? 1.4f : 1.1f);
+                EmitOceanImpact(footPos, transform.forward, footstepWaveRadius, footstepWaveStrength, 1.8f, false, 0f);
+            }
+        }
+
+        private static void EmitOceanImpact(Vector3 worldPos, Vector3 dir, float waveRadius, float waveStrength, float splashIntensity, bool isHeavy, float shakeIntensity)
+        {
             if (WaterSystem.Instance != null)
             {
-                WaterSystem.Instance.AddFootstepWave(transform.position, 28f, 3.5f);
+                worldPos.y = WaterSystem.Instance.GetWaterHeight(worldPos);
+                WaterSystem.Instance.AddFootstepWave(worldPos, waveRadius, waveStrength);
             }
+
             if (WaterSplashManager.Instance != null)
             {
-                WaterSplashManager.Instance.SpawnFootstepSplash(transform.position, 3.5f);
+                if (isHeavy)
+                    WaterSplashManager.Instance.SpawnHeavyMoveWaterKickup(worldPos, dir, splashIntensity, true);
+                else
+                    WaterSplashManager.Instance.SpawnFootstepSplash(worldPos, splashIntensity);
             }
-            rb.isKinematic = false;
-            rb.constraints = RigidbodyConstraints.None;
-            Destroy(this);
+
+            if (isHeavy)
+            {
+                ProceduralSplash.CreateFoamRing(worldPos, waveRadius * 1.05f, 2.2f);
+            }
+
+            if (shakeIntensity > 0f)
+            {
+                Camera cam = Camera.main;
+                if (cam != null)
+                {
+                    var shaker = cam.GetComponent<PacificRimCameraShake>();
+                    if (shaker != null) shaker.TriggerStompFeedback(shakeIntensity);
+                }
+            }
         }
     }
 }

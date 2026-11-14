@@ -25,17 +25,22 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
+    - _AbsorptionScale: 0.35
     - _FoamEdgeFalloff: 0.1
-    - _FoamFalloff: 0.2
+    - _FoamFalloff: 0.18
     - _FoamHeightThreshold: 0.2
-    - _FoamThreshold: 0.5
-    - _Smoothness: 0.93
+    - _FoamThreshold: 0.8
+    - _MeniscusStrength: 0.45
+    - _MicroNormalStrength: 0.18
+    - _RefractionStrength: 0.025
+    - _Smoothness: 0.95
     - _WaveShimmerScale: 4
     - _WaveShimmerSpeed: 1.5
     m_Colors:
-    - _DeepColor: {r: 0.015, g: 0.055, b: 0.12, a: 0.98}
-    - _FoamColor: {r: 0.92, g: 0.96, b: 1, a: 0.95}
-    - _ShallowColor: {r: 0.04, g: 0.18, b: 0.32, a: 0.88}
-    - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
+    - _DeepColor: {r: 0.008, g: 0.032, b: 0.068, a: 1}
+    - _FoamColor: {r: 0.86, g: 0.92, b: 0.96, a: 1}
+    - _ShallowColor: {r: 0.025, g: 0.19, b: 0.28, a: 1}
+    - _SpecularColor: {r: 0.95, g: 0.98, b: 1, a: 1}
+    - _SubsurfaceColor: {r: 0.05, g: 0.34, b: 0.38, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
