@@ -1,13 +1,11 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace PacificRimUI
 {
     /// <summary>
-    /// Translated from UI.Sounds and SoundService in the Battlefront Luau kit.
-    /// Provides audio feedback for Hover, Click, Tab, Deny, Success, Back, and Comm.
-    /// Generates high-tech procedural audio clips on-the-fly when no external audio files are assigned.
+    /// Provides tactile UI audio feedback for Hover, Click, Tab, Deny, Success, Back, and Comm.
+    /// Uses real, authentic industrial and tactical sound effects from user packs (no retro chimes).
     /// </summary>
     public class PacificRimUISound : MonoBehaviour
     {
@@ -49,16 +47,16 @@ namespace PacificRimUI
         [SerializeField] private AudioSource audioSource;
 
         [Header("Volume Overrides")]
-        [Range(0f, 1f)] public float masterVolume = 0f; // Temporary SFX disabled by default per user request
+        [Range(0f, 1f)] public float masterVolume = 0.85f;
         [Range(0f, 1f)] public float hoverVolume = 0.35f;
-        [Range(0f, 1f)] public float clickVolume = 0.55f;
-        [Range(0f, 1f)] public float tabVolume = 0.45f;
-        [Range(0f, 1f)] public float denyVolume = 0.50f;
-        [Range(0f, 1f)] public float successVolume = 0.60f;
-        [Range(0f, 1f)] public float backVolume = 0.50f;
-        [Range(0f, 1f)] public float commVolume = 0.65f;
+        [Range(0f, 1f)] public float clickVolume = 0.70f;
+        [Range(0f, 1f)] public float tabVolume = 0.65f;
+        [Range(0f, 1f)] public float denyVolume = 0.65f;
+        [Range(0f, 1f)] public float successVolume = 0.80f;
+        [Range(0f, 1f)] public float backVolume = 0.60f;
+        [Range(0f, 1f)] public float commVolume = 0.75f;
 
-        [Header("Custom Audio Clips (Optional)")]
+        [Header("Authentic Audio Clips (No Retro Chimes)")]
         public AudioClip hoverClip;
         public AudioClip clickClip;
         public AudioClip tabClip;
@@ -67,7 +65,6 @@ namespace PacificRimUI
         public AudioClip backClip;
         public AudioClip commClip;
 
-        private readonly Dictionary<SoundType, AudioClip> proceduralCache = new Dictionary<SoundType, AudioClip>();
         private float lastHoverTime = -1f;
         private const float HoverCooldown = 0.04f;
 
@@ -97,25 +94,54 @@ namespace PacificRimUI
             audioSource.spatialBlend = 0f; // 2D UI Audio
             audioSource.ignoreListenerPause = true;
 
-            EnsureProceduralClips();
+            EnsureRealClips();
         }
 
-        private void EnsureProceduralClips()
+        public void EnsureRealClips()
         {
-            if (!proceduralCache.ContainsKey(SoundType.Hover))
-                proceduralCache[SoundType.Hover] = CreateProceduralHoverClip();
-            if (!proceduralCache.ContainsKey(SoundType.Click))
-                proceduralCache[SoundType.Click] = CreateProceduralClickClip();
-            if (!proceduralCache.ContainsKey(SoundType.Tab))
-                proceduralCache[SoundType.Tab] = CreateProceduralTabClip();
-            if (!proceduralCache.ContainsKey(SoundType.Deny))
-                proceduralCache[SoundType.Deny] = CreateProceduralDenyClip();
-            if (!proceduralCache.ContainsKey(SoundType.Success))
-                proceduralCache[SoundType.Success] = CreateProceduralSuccessClip();
-            if (!proceduralCache.ContainsKey(SoundType.Back))
-                proceduralCache[SoundType.Back] = CreateProceduralBackClip();
-            if (!proceduralCache.ContainsKey(SoundType.Comm))
-                proceduralCache[SoundType.Comm] = CreateProceduralCommClip();
+            var audioMgr = PacificRimAudio.PacificRimAudioManager.Instance;
+            if (audioMgr != null)
+            {
+                if (hoverClip == null) hoverClip = audioMgr.GetClip("DM-CGS-01");
+                if (clickClip == null) clickClip = audioMgr.GetClip("DM-CGS-03");
+                if (tabClip == null) tabClip = audioMgr.GetClip("DM-CGS-03");
+                if (denyClip == null) denyClip = audioMgr.GetClip("Laser Impact Light_6") ?? audioMgr.GetClip("DM-CGS-31");
+                if (successClip == null) successClip = audioMgr.GetClip("Hydraulic piston mechanical whine") ?? audioMgr.GetClip("JaegerHydraulicServo_01");
+                if (backClip == null) backClip = audioMgr.GetClip("DM-CGS-03");
+                if (commClip == null) commClip = audioMgr.GetClip("Laser Impact Light_6") ?? audioMgr.GetClip("JaegerHydraulicServo_01");
+            }
+
+#if UNITY_EDITOR
+            string cgsDir = "Assets/Casual Game Sounds U6/CasualGameSounds/";
+            string freeDir = "Assets/Free Pack/";
+            string sfxDir = "Assets/SFX/";
+
+            // Pure tactile micro clicks (no melodic/retro chimes)
+            if (hoverClip == null || hoverClip.name.Contains("26") || hoverClip.name.Contains("28"))
+                hoverClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(cgsDir + "DM-CGS-01.wav");
+
+            if (clickClip == null || clickClip.name.Contains("26") || clickClip.name.Contains("28"))
+                clickClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(cgsDir + "DM-CGS-03.wav");
+
+            if (tabClip == null || tabClip.name.Contains("26") || tabClip.name.Contains("28"))
+                tabClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(cgsDir + "DM-CGS-03.wav");
+
+            if (denyClip == null || denyClip.name.Contains("31"))
+                denyClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(freeDir + "Laser Impact Light_6.wav") ??
+                           UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(cgsDir + "DM-CGS-31.wav");
+            
+            // Heavy mechanical hydraulic lock / surge for success / overcharge (NO CHIMES)
+            if (successClip == null || successClip.name.Contains("26") || successClip.name.Contains("28") || successClip.name.Contains("CGS"))
+                successClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(sfxDir + "Hydraulic piston mechanical whine.mp3") ??
+                              UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(sfxDir + "JaegerHydraulicServo_01.mp3");
+            
+            if (backClip == null)
+                backClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(cgsDir + "DM-CGS-03.wav");
+
+            if (commClip == null || commClip.name.Contains("47") || commClip.name.Contains("CGS"))
+                commClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(freeDir + "Laser Impact Light_6.wav") ??
+                           UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(sfxDir + "JaegerHydraulicServo_01.mp3");
+#endif
         }
 
         public static void Play(SoundType type, float volumeMultiplier = 1f)
@@ -155,13 +181,13 @@ namespace PacificRimUI
         {
             switch (type)
             {
-                case SoundType.Hover: return hoverClip != null ? hoverClip : proceduralCache[SoundType.Hover];
-                case SoundType.Click: return clickClip != null ? clickClip : proceduralCache[SoundType.Click];
-                case SoundType.Tab: return tabClip != null ? tabClip : proceduralCache[SoundType.Tab];
-                case SoundType.Deny: return denyClip != null ? denyClip : proceduralCache[SoundType.Deny];
-                case SoundType.Success: return successClip != null ? successClip : proceduralCache[SoundType.Success];
-                case SoundType.Back: return backClip != null ? backClip : proceduralCache[SoundType.Back];
-                case SoundType.Comm: return commClip != null ? commClip : proceduralCache[SoundType.Comm];
+                case SoundType.Hover: return hoverClip;
+                case SoundType.Click: return clickClip;
+                case SoundType.Tab: return tabClip;
+                case SoundType.Deny: return denyClip;
+                case SoundType.Success: return successClip;
+                case SoundType.Back: return backClip;
+                case SoundType.Comm: return commClip;
                 default: return null;
             }
         }
@@ -180,136 +206,5 @@ namespace PacificRimUI
                 default: return 0.5f;
             }
         }
-
-        #region Procedural Audio Clip Synthesizers
-
-        private AudioClip CreateProceduralHoverClip()
-        {
-            // Crisp, gentle sci-fi blip (2400 Hz decaying exponential)
-            int sampleRate = 44100;
-            int sampleCount = (int)(sampleRate * 0.035f);
-            float[] samples = new float[sampleCount];
-            for (int i = 0; i < sampleCount; i++)
-            {
-                float t = (float)i / sampleRate;
-                float env = Mathf.Exp(-t * 90f);
-                samples[i] = Mathf.Sin(2f * Mathf.PI * (2200f + t * 400f) * t) * env * 0.5f;
-            }
-            var clip = AudioClip.Create("UI_Proc_Hover", sampleCount, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        private AudioClip CreateProceduralClickClip()
-        {
-            // Solid mechanical tactile snap + high resonant ping
-            int sampleRate = 44100;
-            int sampleCount = (int)(sampleRate * 0.065f);
-            float[] samples = new float[sampleCount];
-            for (int i = 0; i < sampleCount; i++)
-            {
-                float t = (float)i / sampleRate;
-                float env = Mathf.Exp(-t * 70f);
-                float wave = Mathf.Sin(2f * Mathf.PI * 980f * t) * 0.6f + Mathf.Sin(2f * Mathf.PI * 1960f * t) * 0.4f;
-                samples[i] = wave * env * 0.7f;
-            }
-            var clip = AudioClip.Create("UI_Proc_Click", sampleCount, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        private AudioClip CreateProceduralTabClip()
-        {
-            // Two-tone rising holographic chime (880 Hz -> 1320 Hz)
-            int sampleRate = 44100;
-            int sampleCount = (int)(sampleRate * 0.09f);
-            float[] samples = new float[sampleCount];
-            for (int i = 0; i < sampleCount; i++)
-            {
-                float t = (float)i / sampleRate;
-                float freq = t < 0.045f ? 880f : 1320f;
-                float env = Mathf.Clamp01(1f - (t / 0.09f));
-                samples[i] = Mathf.Sin(2f * Mathf.PI * freq * t) * env * 0.6f;
-            }
-            var clip = AudioClip.Create("UI_Proc_Tab", sampleCount, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        private AudioClip CreateProceduralDenyClip()
-        {
-            // Heavy warning buzz (two downward saw-ish pulses at 160 Hz)
-            int sampleRate = 44100;
-            int sampleCount = (int)(sampleRate * 0.16f);
-            float[] samples = new float[sampleCount];
-            for (int i = 0; i < sampleCount; i++)
-            {
-                float t = (float)i / sampleRate;
-                float env = Mathf.Abs(Mathf.Sin(t * 38f)) * Mathf.Exp(-t * 12f);
-                float wave = Mathf.Sign(Mathf.Sin(2f * Mathf.PI * 180f * t));
-                samples[i] = wave * env * 0.5f;
-            }
-            var clip = AudioClip.Create("UI_Proc_Deny", sampleCount, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        private AudioClip CreateProceduralSuccessClip()
-        {
-            // Ascending triad chime (523Hz C -> 659Hz E -> 784Hz G)
-            int sampleRate = 44100;
-            int sampleCount = (int)(sampleRate * 0.28f);
-            float[] samples = new float[sampleCount];
-            for (int i = 0; i < sampleCount; i++)
-            {
-                float t = (float)i / sampleRate;
-                float freq = t < 0.08f ? 523.25f : (t < 0.16f ? 659.25f : 783.99f);
-                float env = Mathf.Exp(-((t % 0.08f) * 22f)) * (1f - (t / 0.28f));
-                samples[i] = Mathf.Sin(2f * Mathf.PI * freq * t) * env * 0.65f;
-            }
-            var clip = AudioClip.Create("UI_Proc_Success", sampleCount, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        private AudioClip CreateProceduralBackClip()
-        {
-            // Soft downward holographic dismiss tone
-            int sampleRate = 44100;
-            int sampleCount = (int)(sampleRate * 0.08f);
-            float[] samples = new float[sampleCount];
-            for (int i = 0; i < sampleCount; i++)
-            {
-                float t = (float)i / sampleRate;
-                float freq = Mathf.Lerp(1200f, 400f, t / 0.08f);
-                float env = Mathf.Clamp01(1f - (t / 0.08f));
-                samples[i] = Mathf.Sin(2f * Mathf.PI * freq * t) * env * 0.55f;
-            }
-            var clip = AudioClip.Create("UI_Proc_Back", sampleCount, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        private AudioClip CreateProceduralCommClip()
-        {
-            // Radio static burst + high military tone ping
-            int sampleRate = 44100;
-            int sampleCount = (int)(sampleRate * 0.18f);
-            float[] samples = new float[sampleCount];
-            var rng = new System.Random(42);
-            for (int i = 0; i < sampleCount; i++)
-            {
-                float t = (float)i / sampleRate;
-                float noise = (float)(rng.NextDouble() * 2.0 - 1.0) * 0.25f;
-                float tone = Mathf.Sin(2f * Mathf.PI * 1850f * t) * 0.6f;
-                float env = Mathf.Exp(-t * 14f);
-                samples[i] = (noise + tone) * env * 0.6f;
-            }
-            var clip = AudioClip.Create("UI_Proc_Comm", sampleCount, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        #endregion
     }
 }

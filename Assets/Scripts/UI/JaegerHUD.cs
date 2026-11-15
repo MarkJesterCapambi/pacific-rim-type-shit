@@ -77,9 +77,12 @@ namespace PacificRimUI
         private bool wasJaegerDead;
         private int wasKaijuPhase = 1;
         private float impactFlashAlpha;
+        private float impactFlashDecaySpeed = 2.8f;
         private float lastExhaustedBannerTime = -10f;
         private bool stateInitialized;
         private CanvasGroup hudCanvasGroup;
+        private bool isCutsceneMode;
+        private Coroutine neuralBootRoutine;
 
         // GTA-style "baguvix" cheat code state
         private string cheatInputBuffer = "";
@@ -147,6 +150,7 @@ namespace PacificRimUI
 
         private void ApplyHudVisibility()
         {
+            if (isCutsceneMode) return;
             EnsureCanvasGroup();
             if (hudCanvasGroup != null)
             {
@@ -154,6 +158,55 @@ namespace PacificRimUI
                 hudCanvasGroup.blocksRaycasts = !IsHudHidden;
                 hudCanvasGroup.interactable = !IsHudHidden;
             }
+        }
+
+        public void SetCutsceneHidden(bool hidden)
+        {
+            isCutsceneMode = hidden;
+            EnsureCanvasGroup();
+            if (hudCanvasGroup != null)
+            {
+                hudCanvasGroup.alpha = hidden ? 0f : 1f;
+                hudCanvasGroup.blocksRaycasts = !hidden;
+                hudCanvasGroup.interactable = !hidden;
+            }
+        }
+
+        public void PlayNeuralBootSequence(System.Action onComplete = null)
+        {
+            if (neuralBootRoutine != null) StopCoroutine(neuralBootRoutine);
+            neuralBootRoutine = StartCoroutine(NeuralBootRoutine(onComplete));
+        }
+
+        private System.Collections.IEnumerator NeuralBootRoutine(System.Action onComplete)
+        {
+            EnsureCanvasGroup();
+            isCutsceneMode = false;
+
+            // Tactical boot-up flicker sequence: 0 -> 0.7 -> 0.15 -> 0.9 -> 0.35 -> 1.0
+            float[] flickerKeyframes = new float[] { 0.65f, 0.12f, 0.85f, 0.30f, 0.95f, 0.45f, 1.0f };
+            float[] flickerDelays = new float[]    { 0.08f, 0.06f, 0.10f, 0.07f, 0.14f, 0.09f, 0.18f };
+
+            for (int i = 0; i < flickerKeyframes.Length; i++)
+            {
+                if (hudCanvasGroup != null) hudCanvasGroup.alpha = flickerKeyframes[i];
+                PacificRimAudio.PacificRimAudioManager.Instance?.PlayUiClick();
+                yield return new WaitForSeconds(flickerDelays[i]);
+            }
+
+            if (hudCanvasGroup != null)
+            {
+                hudCanvasGroup.alpha = 1f;
+                hudCanvasGroup.blocksRaycasts = true;
+                hudCanvasGroup.interactable = true;
+            }
+
+            ShowBanner("<color=#00e5ff><b>NEURAL HANDSHAKE: 100% // ALL WEAPON SYSTEMS ONLINE</b></color>", 2.4f);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDStaminaRecovered35();
+            PacificRimUISound.PlaySuccess();
+
+            onComplete?.Invoke();
+            neuralBootRoutine = null;
         }
 
         private static bool WasTildePressedThisFrame()
@@ -270,6 +323,32 @@ namespace PacificRimUI
                 cheatInputBuffer = "";
                 TriggerHesoyamCheat();
             }
+            else if (cheatInputBuffer.EndsWith("ironman", System.StringComparison.OrdinalIgnoreCase))
+            {
+                cheatInputBuffer = "";
+                TriggerIronmanCheat();
+            }
+        }
+
+        public void TriggerIronmanCheat()
+        {
+            if (jaeger == null)
+                jaeger = FindAnyObjectByType<SimpleJaegerController>();
+
+            bool active = true;
+            if (jaeger != null)
+            {
+                jaeger.ToggleIronmanCheat();
+                active = jaeger.IsIronmanCheatActive;
+            }
+
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDCheatActivated();
+            PacificRimUISound.PlaySuccess();
+            string bannerMsg = active
+                ? "CHEAT ACTIVATED // IRONMAN: 3X DAMAGE & 3X RESISTANCE"
+                : "CHEAT DEACTIVATED // IRONMAN: NORMAL POWER";
+            ShowBanner(bannerMsg, 4.0f);
+            Debug.Log($"<color=#00e5ff><b>[CHEAT]</b></color> IRONMAN {(active ? "ACTIVATED: 3x Strike Damage & 3x Attack Resistance" : "DEACTIVATED")}");
         }
 
         public void TriggerHesoyamCheat()
@@ -689,12 +768,13 @@ namespace PacificRimUI
         {
             if (impactFlashGroup == null) return;
 
-            impactFlashAlpha = Mathf.MoveTowards(impactFlashAlpha, 0f, Time.unscaledDeltaTime * 2.8f);
+            impactFlashAlpha = Mathf.MoveTowards(impactFlashAlpha, 0f, Time.unscaledDeltaTime * impactFlashDecaySpeed);
             impactFlashGroup.alpha = impactFlashAlpha;
         }
 
         public void TriggerScreenImpact(bool wasBlocked, bool isHeavy)
         {
+            impactFlashDecaySpeed = 2.8f;
             impactFlashAlpha = Mathf.Max(
                 impactFlashAlpha,
                 wasBlocked ? (isHeavy ? 0.72f : 0.50f) : (isHeavy ? 0.92f : 0.68f));
@@ -722,6 +802,42 @@ namespace PacificRimUI
                     impactEdges[i].SetHorizontal(edgeTint, Color.clear);
                 else
                     impactEdges[i].SetHorizontal(Color.clear, edgeTint);
+            }
+        }
+
+        /// <summary>
+        /// Triggers the golden parry vignette peripheral cue and tactical banner.
+        /// Visually mirrors the red hurt vignette style, but in rich metallic gold and tuned to be clean and non-intrusive.
+        /// </summary>
+        public void TriggerParryCue(float staminaPercent = 0.15f)
+        {
+            // Golden parry vignette: smoother, less harsh than damage flash (0.52 alpha vs 0.92) but immediately unmistakable
+            impactFlashDecaySpeed = 1.45f;
+            impactFlashAlpha = 0.54f;
+
+            if (impactFlashGroup != null)
+                impactFlashGroup.alpha = impactFlashAlpha;
+
+            if (impactEdges != null)
+            {
+                // Radiant metallic gold
+                Color goldColor = new Color(1.0f, 0.82f, 0.16f);
+                float edgeAlpha = 0.52f;
+                Color edgeTint = new Color(goldColor.r, goldColor.g, goldColor.b, edgeAlpha);
+
+                for (int i = 0; i < impactEdges.Length; i++)
+                {
+                    if (impactEdges[i] == null) continue;
+                    string edgeName = impactEdges[i].gameObject.name;
+                    if (edgeName.EndsWith("Top"))
+                        impactEdges[i].SetVertical(edgeTint, Color.clear);
+                    else if (edgeName.EndsWith("Bottom"))
+                        impactEdges[i].SetVertical(Color.clear, edgeTint);
+                    else if (edgeName.EndsWith("Left"))
+                        impactEdges[i].SetHorizontal(edgeTint, Color.clear);
+                    else
+                        impactEdges[i].SetHorizontal(Color.clear, edgeTint);
+                }
             }
         }
 

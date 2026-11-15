@@ -39,6 +39,7 @@ namespace PacificRimUI
 
         [Header("Pause Telemetry")]
         [SerializeField] private UnityEngine.UI.Text pauseTitleText;
+        [SerializeField] private UnityEngine.UI.Text pauseSubtitleText;
         [SerializeField] private UnityEngine.UI.Text pauseHealthText;
         [SerializeField] private UnityEngine.UI.Text pauseMissionText;
 
@@ -52,6 +53,7 @@ namespace PacificRimUI
         [Header("State")]
         public bool isMenuOpen = true;
         private bool isDefeated = false;
+        private bool isVictorious = false;
 
         private bool listenersBound;
 
@@ -81,6 +83,9 @@ namespace PacificRimUI
 
             if (isMainMenuScene)
             {
+                // Pre-warm main menu shaders, audio, and cache in the background
+                PacificRimLoadingScreen.WarmupMainMenuAssets();
+
                 isMenuOpen = true;
                 SetMenuState(true);
                 if (deployButton != null)
@@ -90,6 +95,19 @@ namespace PacificRimUI
                 if (exitButton != null)
                 {
                     exitButton.SetText("DISENGAGE");
+                }
+                if (pauseTitleText != null)
+                {
+                    pauseTitleText.text = "PACIFIC RIM: OPERATION PITFALL";
+                    pauseTitleText.color = PacificRimUITheme.BlueBright;
+                }
+                if (pauseSubtitleText != null)
+                {
+                    pauseSubtitleText.text = "PAN PACIFIC DEFENSE CORPS // TACTICAL COMMAND INTERFACE";
+                }
+                if (pauseMissionText != null)
+                {
+                    pauseMissionText.text = "MISSION OBJECTIVE: INTERCEPT CATEGORY IV KAIJU 'LEATHERBACK'";
                 }
             }
             else
@@ -105,6 +123,14 @@ namespace PacificRimUI
                 {
                     exitButton.SetText("MAIN MENU");
                 }
+                if (pauseTitleText != null)
+                {
+                    pauseTitleText.text = "PACIFIC RIM: OPERATION PITFALL // TACTICAL PAUSE";
+                }
+                if (pauseSubtitleText != null)
+                {
+                    pauseSubtitleText.text = "PPDC COMMAND // DRIFT ARCHIVE & TELEMETRY";
+                }
                 if (jaegerHud != null)
                 {
                     jaegerHud.ShowBanner("NEURAL HANDSHAKE COMPLETE // ENGAGE", 3.5f);
@@ -114,6 +140,12 @@ namespace PacificRimUI
             if (tabBar != null)
             {
                 OnTabSelected(tabBar.activeIndex);
+            }
+
+            if (pauseSubtitleText == null && menuVisualsRoot != null)
+            {
+                var t = menuVisualsRoot.transform.Find("Pause_DialogBox/Pause_Subtitle");
+                if (t != null) pauseSubtitleText = t.GetComponent<UnityEngine.UI.Text>();
             }
         }
 
@@ -164,9 +196,13 @@ namespace PacificRimUI
 
         private void Update()
         {
-            if (isDefeated)
+            if (isDefeated || isVictorious)
             {
-                // In defeat screen, Esc is disabled so player must restart or return to main menu
+                // In defeat or victory screen, Esc is disabled so player must restart or return to main menu
+                if (!IsAnyModalOpen() && WasConfirmPressedThisFrame())
+                {
+                    OnRestartClicked();
+                }
                 return;
             }
 
@@ -249,13 +285,13 @@ namespace PacificRimUI
 
         public void ToggleMenu()
         {
-            if (isDefeated) return;
+            if (isDefeated || isVictorious) return;
             SetMenuState(!isMenuOpen);
         }
 
         public void SetDefeatState()
         {
-            if (isDefeated) return;
+            if (isDefeated || isVictorious) return;
             isDefeated = true;
             SetMenuState(true);
 
@@ -265,12 +301,18 @@ namespace PacificRimUI
             }
             if (restartButton != null)
             {
+                restartButton.gameObject.SetActive(true);
                 restartButton.SetText("RESTART MISSION");
             }
             if (pauseTitleText != null)
             {
                 pauseTitleText.text = "MISSION FAILED // CRITICAL BREACH";
                 pauseTitleText.color = PacificRimUITheme.Danger;
+            }
+            if (pauseSubtitleText != null)
+            {
+                pauseSubtitleText.text = "PACIFIC DEFENSE COMMAND // DRIFT LINK COLLAPSED";
+                pauseSubtitleText.color = PacificRimUITheme.Danger;
             }
             if (pauseHealthText != null)
             {
@@ -281,6 +323,49 @@ namespace PacificRimUI
             {
                 pauseMissionText.text = "NEURAL DRIFT LINK COLLAPSED // JAEGER HULL BREACHED";
             }
+        }
+
+        public void SetVictoryState()
+        {
+            if (isVictorious || isDefeated) return;
+            isVictorious = true;
+            SetMenuState(true);
+
+            if (deployButton != null)
+            {
+                deployButton.gameObject.SetActive(false);
+            }
+            if (restartButton != null)
+            {
+                restartButton.gameObject.SetActive(true);
+                restartButton.SetText("REPLAY MISSION");
+            }
+            if (pauseTitleText != null)
+            {
+                pauseTitleText.text = "MISSION ACCOMPLISHED // VICTORY";
+                pauseTitleText.color = PacificRimUITheme.BlueBright;
+            }
+            if (pauseSubtitleText != null)
+            {
+                pauseSubtitleText.text = "PACIFIC DEFENSE COMMAND // LEATHERBACK ELIMINATED";
+                pauseSubtitleText.color = PacificRimUITheme.Success;
+            }
+            if (pauseHealthText != null)
+            {
+                var jaeger = UnityEngine.Object.FindAnyObjectByType<PacificRimWater.SimpleJaegerController>();
+                int hp = jaeger != null ? Mathf.Max(0, Mathf.CeilToInt(jaeger.currentHealth)) : 1000;
+                int maxHp = jaeger != null ? Mathf.CeilToInt(jaeger.maxHealth) : 1000;
+                pauseHealthText.text = $"CATEGORY IV KAIJU ELIMINATED // JAEGER STANDING ({hp} / {maxHp} HP)";
+                pauseHealthText.color = PacificRimUITheme.Success;
+            }
+            if (pauseMissionText != null)
+            {
+                pauseMissionText.text = "THE PACIFIC BASIN IS SECURED // THE SHATTERDOME COMMENDS YOU, RANGER";
+                pauseMissionText.color = PacificRimUITheme.Text;
+            }
+
+            PacificRimUISound.PlaySuccess();
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDCheatActivated();
         }
 
         public void SetMenuState(bool open)
@@ -316,6 +401,23 @@ namespace PacificRimUI
 
             if (open)
             {
+                if (!isDefeated && !isVictorious)
+                {
+                    if (pauseTitleText != null)
+                    {
+                        pauseTitleText.text = isMainMenuScene
+                            ? "PACIFIC RIM: OPERATION PITFALL"
+                            : "PACIFIC RIM: OPERATION PITFALL // TACTICAL PAUSE";
+                        pauseTitleText.color = isMainMenuScene ? PacificRimUITheme.BlueBright : PacificRimUITheme.Text;
+                    }
+                    if (pauseSubtitleText != null)
+                    {
+                        pauseSubtitleText.text = isMainMenuScene
+                            ? "PAN PACIFIC DEFENSE CORPS // TACTICAL COMMAND INTERFACE"
+                            : "PPDC COMMAND // DRIFT ARCHIVE & TELEMETRY";
+                        pauseSubtitleText.color = PacificRimUITheme.TextDim;
+                    }
+                }
                 UpdateTelemetry();
             }
 
@@ -376,7 +478,7 @@ namespace PacificRimUI
             {
                 PacificRimUISound.PlaySuccess();
                 Time.timeScale = 1f;
-                SceneManager.LoadScene(gameplaySceneName);
+                PacificRimLoadingScreen.LoadScene(gameplaySceneName);
             }
             else
             {
@@ -406,19 +508,19 @@ namespace PacificRimUI
         {
             PacificRimUISound.Play(PacificRimUISound.SoundType.Click);
             Time.timeScale = 1f;
-            SceneManager.LoadScene(gameplaySceneName);
+            PacificRimLoadingScreen.LoadScene(gameplaySceneName);
         }
 
         public void OnReturnToMenuClicked()
         {
             PacificRimUISound.Play(PacificRimUISound.SoundType.Back);
             Time.timeScale = 1f;
-            SceneManager.LoadScene(mainMenuSceneName);
+            PacificRimLoadingScreen.LoadScene(mainMenuSceneName);
         }
 
         private void UpdateTelemetry()
         {
-            if (isMainMenuScene || isDefeated) return;
+            if (isMainMenuScene || isDefeated || isVictorious) return;
 
             var jaeger = UnityEngine.Object.FindAnyObjectByType<PacificRimWater.SimpleJaegerController>();
             if (jaeger != null && pauseHealthText != null)

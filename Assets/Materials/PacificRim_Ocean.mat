@@ -22,7 +22,15 @@ Material:
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
-    m_TexEnvs: []
+    m_TexEnvs:
+    - _NormalMap:
+        m_Texture: {fileID: 2800000, guid: fdd39131993ce804da86a2e71c17a742, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _FoamMap:
+        m_Texture: {fileID: 2800000, guid: 14c55ed649175884784db6c178f4e654, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
     - _AbsorptionScale: 0.35
@@ -30,8 +38,10 @@ Material:
     - _FoamFalloff: 0.18
     - _FoamHeightThreshold: 0.2
     - _FoamThreshold: 0.8
+    - _FoamTiling: 0.12
     - _MeniscusStrength: 0.45
     - _MicroNormalStrength: 0.18
+    - _NormalTiling: 0.05
     - _RefractionStrength: 0.025
     - _Smoothness: 0.95
     - _WaveShimmerScale: 4

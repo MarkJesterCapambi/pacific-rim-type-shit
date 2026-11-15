@@ -15,43 +15,43 @@ namespace PacificRimWater
         [Header("Health & Combat")]
         public float maxHealth = 1000f;
         public float currentHealth = 1000f;
-        public float punchDamage = 50f;
+        public float punchDamage = 62.5f;
         public float punchRange = 18f;
-        public float punchCooldown = 1.16f;
+        public float punchCooldown = 0.93f;
         public float comboResetWindow = 2.4f;
-        public float heavyAttackDamage = 110f;
+        public float heavyAttackDamage = 137.5f;
         public float heavyAttackRange = 22f;
-        public float heavyAttackCooldown = 1.5f;
-        [Tooltip("Playback speed multiplier applied to attack states in the Animator (0.75 = 25% slower).")]
-        public float attackAnimSpeed = 0.75f;
+        public float heavyAttackCooldown = 1.20f;
+        [Tooltip("Playback speed multiplier applied to attack states in the Animator (0.9375 = 1.25x faster).")]
+        public float attackAnimSpeed = 0.9375f;
         [Tooltip("Movement speed multiplier during light attacks (0.70 = 30% slower).")]
         public float lightAttackSpeedMultiplier = 0.70f;
         [Tooltip("Movement speed multiplier during heavy attacks (0.30 = 70% slower).")]
         public float heavyAttackSpeedMultiplier = 0.30f;
 
         [Header("Locomotion")]
-        [Tooltip("Walk speed in meters per second.")]
-        public float walkSpeed = 8.5f;
-        [Tooltip("Run/Sprint speed in meters per second.")]
-        public float runSpeed = 22.5f;
+        [Tooltip("Walk speed in meters per second (buffed 1.5x from 8.5 m/s).")]
+        public float walkSpeed = 12.75f;
+        [Tooltip("Run/Sprint speed in meters per second (buffed 1.5x from 22.5 m/s).")]
+        public float runSpeed = 33.75f;
         [Tooltip("Turn rotation speed in degrees per second.")]
         public float turnSpeed = 55f;
         [Tooltip("Acceleration responsiveness (lower = heavier feel).")]
         public float acceleration = 2.5f;
 
         [Header("Stamina & Exhaustion")]
-        public float maxStamina = 100f;
-        public float currentStamina = 100f;
+        public float maxStamina = 125f;
+        public float currentStamina = 125f;
         public float lightAttackStaminaCost = 16f;
         public float heavyAttackStaminaCost = 32f;
-        public float blockLightStaminaCost = 20f;
-        public float blockHeavyStaminaCost = 36f;
+        public float blockLightStaminaCost = 16f;
+        public float blockHeavyStaminaCost = 28.8f;
         public float staminaRegenRate = 24f;
         public float staminaRegenDelay = 0.85f;
         [Tooltip("Fraction of max stamina required to recover from exhaustion before attacks are unlocked (0.35 = 35%).")]
         [Range(0.05f, 0.95f)]
         public float exhaustionRecoveryRatio = 0.35f;
-        public float exhaustionRecoveryThreshold = 35f;
+        public float exhaustionRecoveryThreshold = 43.75f;
 
         [Header("Running Mode")]
         [Tooltip("Toggle run mode on/off when pressing Shift (false = hold Shift to run).")]
@@ -77,6 +77,13 @@ namespace PacificRimWater
         [Tooltip("Speed multiplier while blocking.")]
         public float blockSpeedMultiplier = 0.35f;
 
+        [Header("Parry System")]
+        [Tooltip("Precision time window in seconds after raising block where an incoming strike is perfectly parried (tightened to 0.18s for high-skill deflection).")]
+        public float parryWindow = 0.18f;
+        [Tooltip("Percentage of max stamina granted on a successful parry (0.15 = +15%).")]
+        public float parryStaminaRestorePercent = 0.15f;
+        public float LastBlockStartTime { get; private set; } = -10f;
+
         [Header("Emote & Power-Up")]
         [Tooltip("Duration in seconds of the power-up buff gained from performing the Emote.")]
         public float powerUpDuration = 15f;
@@ -84,6 +91,20 @@ namespace PacificRimWater
         public float powerUpAttackSpeedMultiplier = 1.30f;
         [Tooltip("Cooldown reduction multiplier when powered up (0.75 = 25% faster cooldowns).")]
         public float powerUpCooldownMultiplier = 0.75f;
+
+        [Header("Damage Reaction & Stagger")]
+        [Tooltip("Lockout duration in seconds where no attacks can be launched after taking an unblocked hit.")]
+        public float hitAttackLockoutDuration = 0.15f;
+        private float hitAttackDisallowedUntil = -10f;
+        private Coroutine activeDelayedStrikeCoroutine = null;
+        private float sprintAttackEndTime = -10f;
+
+        public bool IsHitStaggered => Time.time < hitAttackDisallowedUntil;
+        public bool IsSprintAttacking => Time.time < sprintAttackEndTime;
+
+        [Header("Cutscene & Deployment Mode")]
+        [Tooltip("True while the pre-fight deployment cutscene is active; locks player input and physics locomotion.")]
+        public bool isCutsceneActive = false;
 
         [Header("Animation")]
         public Animator animator;
@@ -114,7 +135,7 @@ namespace PacificRimWater
         public float stompCooldown = 1.2f;
 
         private const float LightPunchClipLength = 0.967f;
-        private const float EmoteClipLength = 3.667f;
+        private const float EmoteClipLength = 7.334f; // 3.667s clip slowed by 0.5x = 7.334s
 
         private Rigidbody rb;
         private JaegerWaterInteraction waterInteraction;
@@ -163,6 +184,25 @@ namespace PacificRimWater
         public bool IsExhausted { get; private set; }
         public bool IsDead => currentHealth <= 0f;
         public float StaminaRatio => maxStamina > 0f ? Mathf.Clamp01(currentStamina / maxStamina) : 0f;
+        public bool IsIronmanCheatActive { get; private set; } = false;
+
+        public void ToggleIronmanCheat()
+        {
+            IsIronmanCheatActive = !IsIronmanCheatActive;
+            Debug.Log($"<color=#00e5ff><b>[CHEAT]</b></color> IRONMAN {(IsIronmanCheatActive ? "ACTIVATED: 3x Strike Damage & 3x Attack Resistance engaged!" : "DEACTIVATED")}");
+        }
+
+        public void ActivateIronmanCheat()
+        {
+            IsIronmanCheatActive = true;
+            Debug.Log("<color=#00e5ff><b>[CHEAT]</b></color> IRONMAN ACTIVATED: 3x Strike Damage & 3x Attack Resistance engaged!");
+        }
+
+        public void TriggerVictoryPose()
+        {
+            if (IsDead) return;
+            PerformEmote();
+        }
 
         private JaegerVisualSockets visualSockets;
 
@@ -223,7 +263,7 @@ namespace PacificRimWater
 
         void Update()
         {
-            if (PacificRimUI.MainMenuUI.IsMenuOpen)
+            if (PacificRimUI.MainMenuUI.IsMenuOpen || isCutsceneActive)
             {
                 return;
             }
@@ -353,7 +393,12 @@ namespace PacificRimWater
             bool isAttacking = isHeavyAttacking || isLightAttacking;
 
             // Block status via F (active when holding F, not emoting or attacking or exhausted)
+            bool wasBlockingBefore = isBlocking;
             isBlocking = blockHeld && !isAttacking && !isEmotingNow && !IsExhausted;
+            if (isBlocking && !wasBlockingBefore)
+            {
+                LastBlockStartTime = Time.time;
+            }
             if (isBlocking)
             {
                 combatStanceEndTime = Time.time + combatStancePersistDuration;
@@ -549,8 +594,8 @@ namespace PacificRimWater
                 }
             }
 
-            // Stomp shockwave (disabled while emoting)
-            if (!isEmotingNow && stompTriggered && Time.time >= lastStompTime + stompCooldown)
+            // Stomp shockwave (disabled while emoting or hit staggered)
+            if (!isEmotingNow && !IsHitStaggered && stompTriggered && Time.time >= lastStompTime + stompCooldown)
             {
                 lastStompTime = Time.time;
                 combatStanceEndTime = Time.time + combatStancePersistDuration;
@@ -561,7 +606,7 @@ namespace PacificRimWater
             float currentPunchCooldown = IsPoweredUp ? (punchCooldown * powerUpCooldownMultiplier) : punchCooldown;
             float currentHeavyCooldown = IsPoweredUp ? (heavyAttackCooldown * powerUpCooldownMultiplier) : heavyAttackCooldown;
 
-            if (!isEmotingNow && !isBlocking)
+            if (!isEmotingNow && !isBlocking && !IsHitStaggered)
             {
                 if (IsExhausted || currentStamina <= 0.01f)
                 {
@@ -615,6 +660,8 @@ namespace PacificRimWater
 
         void FixedUpdate()
         {
+            if (isCutsceneActive) return;
+
             if (IsDead)
             {
                 targetVelocity = Vector3.zero;
@@ -804,6 +851,8 @@ namespace PacificRimWater
             animator.ResetTrigger("HeavyAttackRun");
             animator.ResetTrigger("Emote");
             animator.ResetTrigger("BlockHit");
+            animator.ResetTrigger("HitLeft");
+            animator.ResetTrigger("HitRight");
         }
 
         private int GetNextPunchInCycle(bool resetCycle)
@@ -850,6 +899,11 @@ namespace PacificRimWater
 
         private bool CanStartNextLightAttack()
         {
+            if (Time.time < hitAttackDisallowedUntil)
+            {
+                return false;
+            }
+
             if (IsExhausted || currentStamina <= 0.01f)
             {
                 return false;
@@ -927,7 +981,8 @@ namespace PacificRimWater
             float currentPunchDamage = IsPoweredUp ? (punchDamage * 1.25f) : punchDamage;
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayAttackWhoosh(transform.position + transform.forward * 4f + Vector3.up * 14f, isHeavy: false);
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayHydraulicServo(transform.position + Vector3.up * 12f, 0.5f);
-            StartCoroutine(ExecuteDelayedStrike(punchNumber, currentPunchDamage, punchRange, landTime / animSpeed, isHeavy: false));
+            if (activeDelayedStrikeCoroutine != null) StopCoroutine(activeDelayedStrikeCoroutine);
+            activeDelayedStrikeCoroutine = StartCoroutine(ExecuteDelayedStrike(punchNumber, currentPunchDamage, punchRange, landTime / animSpeed, isHeavy: false));
 
             Debug.Log($"<color=#00e5ff><b>[Jaeger]</b></color> Punch {punchNumber} initiated! (cycle [{punchCycleOrder[0]}-{punchCycleOrder[1]}-{punchCycleOrder[2]}], step {stepInCycle}/3, fist impact in {landTime / animSpeed:F2}s, combo ready in {landTime / animSpeed:F2}s)");
         }
@@ -945,6 +1000,15 @@ namespace PacificRimWater
             ConsumeStamina(IsPoweredUp ? heavyAttackStaminaCost * 0.70f : heavyAttackStaminaCost);
             NotifyKaijuAttackStarted(variant, isHeavy: true);
 
+            if (runningAttack)
+            {
+                sprintAttackEndTime = heavyAttackEndTime;
+            }
+            else
+            {
+                sprintAttackEndTime = -10f;
+            }
+
             if (animator != null)
             {
                 ResetAttackTriggers();
@@ -953,26 +1017,31 @@ namespace PacificRimWater
 
             // Calibrated time until heavy slam actually lands
             float landTime = runningAttack ? 1.55f : 1.38f;
+            float blastDuration = (runningAttack ? landTime : 1.15f) / animSpeed;
+
+            // Rocket thrusters VFX/SFX are exclusively engaged for the jumping/sprint heavy attack
             if (runningAttack)
             {
                 if (visualSockets == null) visualSockets = GetComponent<JaegerVisualSockets>() ?? GetComponentInChildren<JaegerVisualSockets>();
-                visualSockets?.TriggerRocketBlast(landTime / animSpeed);
+                visualSockets?.TriggerRocketBlast(blastDuration);
                 PacificRimAudio.PacificRimAudioManager.Instance?.PlayRocketIgnition(transform.position + Vector3.up * 14f);
-                StartCoroutine(RocketBurnAudioRoutine(landTime / animSpeed));
+                StartCoroutine(RocketBurnAudioRoutine(blastDuration));
             }
+
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayAttackWhoosh(transform.position + transform.forward * 5f + Vector3.up * 15f, isHeavy: true);
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayHydraulicServo(transform.position + Vector3.up * 12f, 0.75f);
             float currentHeavyDamage = IsPoweredUp ? (heavyAttackDamage * 1.25f) : heavyAttackDamage;
-            StartCoroutine(ExecuteDelayedStrike(variant, currentHeavyDamage, heavyAttackRange, landTime / animSpeed, isHeavy: true));
+            if (activeDelayedStrikeCoroutine != null) StopCoroutine(activeDelayedStrikeCoroutine);
+            activeDelayedStrikeCoroutine = StartCoroutine(ExecuteDelayedStrike(variant, currentHeavyDamage, heavyAttackRange, landTime / animSpeed, isHeavy: true));
 
-            Debug.Log($"<color=#ffaa00><b>[Jaeger]</b></color> {(runningAttack ? "Running Heavy Attack" : "Heavy Attack")} initiated! (fist impact in {landTime / animSpeed:F2}s)");
+            Debug.Log($"<color=#ffaa00><b>[Jaeger]</b></color> {(runningAttack ? "Running Heavy Attack (Uninterruptible)" : "Heavy Attack")} initiated! (fist impact in {landTime / animSpeed:F2}s)");
         }
 
         private System.Collections.IEnumerator ExecuteDelayedStrike(int attackVariant, float damage, float range, float delay, bool isHeavy)
         {
             yield return new WaitForSeconds(delay);
 
-            if (this == null || !gameObject.activeInHierarchy) yield break;
+            if (this == null || !gameObject.activeInHierarchy || (Time.time < hitAttackDisallowedUntil && attackVariant != 5)) yield break;
 
             ResolveHandTransforms();
             Transform activeHand = (attackVariant == 1 || attackVariant == 4) ? handR : handL;
@@ -1019,6 +1088,9 @@ namespace PacificRimWater
             {
                 WaterSplashManager.Instance.SpawnHeavyMoveWaterKickup(transform.position, Vector3.up, 2.2f, true);
             }
+
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlaySteamVent(transform.position + Vector3.up * 14f);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayGipsyFoghorn(transform.position + Vector3.up * 18f);
 
             Camera cam = Camera.main;
             if (cam != null)
@@ -1067,8 +1139,9 @@ namespace PacificRimWater
                 {
                     if (!damagedKaiju)
                     {
+                        float effectiveDamage = IsIronmanCheatActive ? (damage * 3f) : damage;
                         Vector3 knockback = transform.forward * knockbackDist;
-                        kaiju.TakeDamage(damage, knockback, attackVariant, rawStrikePos);
+                        kaiju.TakeDamage(effectiveDamage, knockback, attackVariant, rawStrikePos);
                         damagedKaiju = true;
                     }
                     didHit = true;
@@ -1082,20 +1155,68 @@ namespace PacificRimWater
             return didHit;
         }
 
-        public void TakeDamage(float amount, Vector3 knockback, bool isHeavy = false)
+        public void TakeDamage(float amount, Vector3 knockback, bool isHeavy = false, Vector3 hitPoint = default)
         {
             if (IsDead) return;
 
+            if (IsIronmanCheatActive)
+            {
+                amount /= 3f;
+                knockback /= 3f;
+            }
+
             if (!isHeavy && amount >= 65f) isHeavy = true;
 
-            Vector3 impactPos = transform.position + transform.forward * 3.2f + Vector3.up * 15.5f;
+            Vector3 impactPos = hitPoint.sqrMagnitude > 0.01f ? hitPoint : (transform.position + transform.forward * 3.2f + Vector3.up * 15.5f);
             float actualAmount = amount;
             bool blockedHit = isBlocking && !IsExhausted;
+            bool isParry = blockedHit && (Time.time <= LastBlockStartTime + parryWindow);
 
             Camera cam = Camera.main;
             PacificRimCameraShake shaker = cam != null ? cam.GetComponent<PacificRimCameraShake>() : null;
 
-            if (blockedHit)
+            if (isParry)
+            {
+                // Deflect attack completely: zero damage taken, zero knockback
+                actualAmount = 0f;
+                knockback = Vector3.zero;
+
+                // Award +15% max stamina and break out of exhaustion immediately
+                float staminaReward = maxStamina * parryStaminaRestorePercent;
+                currentStamina = Mathf.Min(maxStamina, currentStamina + staminaReward);
+                if (IsExhausted)
+                {
+                    IsExhausted = false;
+                    PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDStaminaRecovered35();
+                }
+                lastStaminaSpendTime = Time.time - staminaRegenDelay;
+
+                // Stagger enemy without damaging enemy
+                if (cachedKaiju == null) cachedKaiju = FindAnyObjectByType<KaijuAI>();
+                if (cachedKaiju != null && !cachedKaiju.IsDead)
+                {
+                    Vector3 recoilDir = -transform.forward * 6.5f + Vector3.up * 1.5f;
+                    cachedKaiju.TriggerParryStagger(recoilDir);
+                }
+
+                // Audio & visual cues (audible clang + golden vignette + radiant sparks)
+                PacificRimAudio.PacificRimAudioManager.Instance?.PlayParryClang(impactPos);
+                PacificRimUI.JaegerHUD.Instance?.TriggerParryCue(parryStaminaRestorePercent);
+                WaterSplashManager.Instance?.SpawnParrySparks(impactPos, transform.forward);
+
+                if (animator != null)
+                {
+                    animator.SetTrigger("BlockHit");
+                }
+                if (shaker != null)
+                {
+                    shaker.TriggerBlockImpactFeedback(isHeavy ? 2.85f : 2.15f);
+                }
+
+                Debug.Log($"<color=#ffd700><b>[PERFECT PARRY]</b></color> Deflected {amount:F0} DMG! Awarded +{staminaReward:F0} Stamina ({currentStamina:F0}/{maxStamina:F0}). Kaiju STAGGERED!");
+                return;
+            }
+            else if (blockedHit)
             {
                 ConsumeStamina(isHeavy ? blockHeavyStaminaCost : blockLightStaminaCost);
                 actualAmount = amount * (1f - Mathf.Clamp01(blockDamageReduction));
@@ -1114,8 +1235,38 @@ namespace PacificRimWater
                 Debug.Log($"<color=#00e5ff><b>[Jaeger BLOCK]</b></color> Guard absorbed {amount - actualAmount:F1} DMG! Took {actualAmount:F1} DMG (Stamina: {currentStamina:F0}/{maxStamina:F0}).");
                 knockback *= 0.25f;
             }
+            else if (IsSprintAttacking)
+            {
+                // UNINTERRUPTIBLE SPRINT ATTACK:
+                // Absorbs incoming strikes with hyper-armor. No animation stagger, no attack cancel, no attack lockout.
+                knockback = Vector3.zero;
+
+                if (shaker != null)
+                {
+                    shaker.TriggerPlayerHitFeedback(isHeavy);
+                }
+                PacificRimAudio.PacificRimAudioManager.Instance?.PlayArmorCreak(transform.position + Vector3.up * 14f, 0.85f);
+                WaterSplashManager.Instance?.SpawnCombatSparks(impactPos, transform.forward, isBlocked: false, isHeavy: isHeavy, isKaijuTarget: false);
+                PacificRimUI.JaegerHUD.Instance?.TriggerScreenImpact(wasBlocked: false, isHeavy: isHeavy);
+
+                Debug.Log($"<color=#ffaa00><b>[Jaeger UNINTERRUPTIBLE]</b></color> Took {actualAmount:F1} DMG during Sprint-Attack! Hyper-Armor active, strike carries through uninterrupted.");
+            }
             else
             {
+                // Disallow launching any attack for 0.15 seconds
+                hitAttackDisallowedUntil = Time.time + hitAttackLockoutDuration;
+                isPunchBuffered = false;
+                heavyAttackEndTime = Time.time - 1f;
+                lightAttackEndTime = Time.time - 1f;
+
+                if (activeDelayedStrikeCoroutine != null)
+                {
+                    StopCoroutine(activeDelayedStrikeCoroutine);
+                    activeDelayedStrikeCoroutine = null;
+                }
+
+                ResetAttackTriggers();
+
                 if (shaker != null)
                 {
                     shaker.TriggerPlayerHitFeedback(isHeavy);
@@ -1123,11 +1274,51 @@ namespace PacificRimWater
                 PacificRimAudio.PacificRimAudioManager.Instance?.PlayArmorCreak(transform.position + Vector3.up * 14f, 0.9f);
                 WaterSplashManager.Instance?.SpawnCombatSparks(impactPos, transform.forward, isBlocked: false, isHeavy: isHeavy, isKaijuTarget: false);
                 PacificRimUI.JaegerHUD.Instance?.TriggerScreenImpact(wasBlocked: false, isHeavy: isHeavy);
+
+                // Determine directional stagger:
+                // If hit on the left, Gipsy staggers left (HitLeft / Hit2).
+                // If hit on the right, Gipsy staggers right (HitRight / Hit1).
+                bool isHitLeft;
+                if (hitPoint.sqrMagnitude > 0.01f)
+                {
+                    Vector3 localHit = transform.InverseTransformPoint(hitPoint);
+                    isHitLeft = localHit.x < 0f;
+                }
+                else if (knockback.sqrMagnitude > 0.01f)
+                {
+                    Vector3 localKb = transform.InverseTransformDirection(knockback);
+                    isHitLeft = localKb.x < 0f;
+                }
+                else if (cachedKaiju != null)
+                {
+                    Vector3 localKaiju = transform.InverseTransformPoint(cachedKaiju.transform.position);
+                    isHitLeft = localKaiju.x < 0f;
+                }
+                else
+                {
+                    isHitLeft = Random.value < 0.5f;
+                }
+
+                if (animator != null)
+                {
+                    string targetState = isHitLeft ? "HitLeft" : "HitRight";
+                    animator.CrossFade(targetState, 0.06f, 0);
+                    animator.SetTrigger(targetState);
+
+                    if (animator.layerCount > 1)
+                    {
+                        lowerBodyLayerWeight = 0f;
+                        animator.SetLayerWeight(1, 0f);
+                    }
+                }
+
+                Debug.Log($"<color=#ff4444><b>[Jaeger STAGGER]</b></color> Hit {(isHitLeft ? "LEFT" : "RIGHT")}! Playing {(isHitLeft ? "HitLeft" : "HitRight")}. Attacks locked for {hitAttackLockoutDuration:F2}s.");
             }
 
             currentHealth = Mathf.Max(0f, currentHealth - actualAmount);
             Debug.Log($"<color=#ff4444><b>[Jaeger]</b></color> Taken {actualAmount:F1} DMG! Armor: {currentHealth:F0}/{maxHealth:F0}");
-            rb.AddForce(knockback, ForceMode.Impulse);
+            if (rb == null) rb = GetComponent<Rigidbody>();
+            if (rb != null) rb.AddForce(knockback, ForceMode.Impulse);
 
             if (currentHealth <= 0f)
             {
@@ -1137,6 +1328,13 @@ namespace PacificRimWater
 
         private void Die()
         {
+            sprintAttackEndTime = -10f;
+            if (activeDelayedStrikeCoroutine != null)
+            {
+                StopCoroutine(activeDelayedStrikeCoroutine);
+                activeDelayedStrikeCoroutine = null;
+            }
+
             isBlocking = false;
             inCombatStance = false;
             isRunning = false;

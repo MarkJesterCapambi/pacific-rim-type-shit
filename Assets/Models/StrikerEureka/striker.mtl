@@ -1,0 +1,364 @@
+newmtl Plane0211Mtl
+Material Color
+Ka 0.173439 0.173439 0.173439
+Kd 0.173439 0.173439 0.173439
+Ks 0.115626 0.115626 0.115626 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl Plane0361Mtl
+Material Color
+Ka 0.201096 0.334458 0.45908
+Kd 0.201096 0.334458 0.45908
+Ks 0.134064 0.222972 0.306053 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl Cylinder1051Mtl
+Material Color
+Ka 0 1 0
+Kd 0 1 0
+Ks 0 0.0901961 0 
+
+d 1
+
+Ns 0
+
+newmtl Cube3661Mtl
+Material Color
+Ka 0 0 1
+Kd 0 0 1
+Ks 0 0 0.0901961 
+
+d 1
+
+Ns 0
+
+newmtl Cylinder0221Mtl
+Material Color
+Ka 0.91575 0.618686 0.0253713
+Kd 0.91575 0.618686 0.0253713
+Ks 0.6105 0.412457 0.0169142 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl Cylinder1451Mtl
+Material Color
+Ka 1 0 0
+Kd 1 0 0
+Ks 0.0901961 0 0 
+
+d 1
+
+Ns 0
+
+newmtl Cube0641Mtl
+Material Color
+Ka 0.560499 0.0169881 0.00775103
+Kd 0.560499 0.0169881 0.00775103
+Ks 0.373666 0.0113254 0.00516735 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl ImportantBit1Mtl
+Material Color
+Ka 0.238828 0.180144 0.0511221
+Kd 0.238828 0.180144 0.0511221
+Ks 0.159219 0.120096 0.0340814 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl Plane1Mtl
+Material Color
+Ka 0.687031 0.56681 0.329729
+Kd 0.687031 0.56681 0.329729
+Ks 0.0619675 0.051124 0.0297403 
+
+d 1
+
+Ns 0
+
+newmtl Cylinder0321Mtl
+Material Color
+Ka 0.399293 0.399293 0.399293
+Kd 0.399293 0.399293 0.399293
+Ks 0.266196 0.266196 0.266196 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl Plane0011Mtl
+Material Color
+Ka 0.638779 0.334458 0.0356144
+Kd 0.638779 0.334458 0.0356144
+Ks 0.638779 0.334458 0.0356144 
+
+d 1
+
+Ns 0
+
+map_Ka Plane0011_diff.png
+map_Kd Plane0011_diff.png
+map_d Plane0011_diff.png
+
+map_Bump Plane0011_nmap.png
+
+map_Ns Plane0011_spec.png
+
+newmtl Plane0451Mtl
+Material Color
+Ka 0.373615 0.368591 0.383775
+Kd 0.373615 0.368591 0.383775
+Ks 0.0336986 0.0332455 0.034615 
+
+d 1
+
+Ns 0
+
+newmtl Cube3612Mtl
+Material Color
+Ka 0 0 0
+Kd 0 0 0
+Ks 0 0 0 
+
+d 0
+
+Ns 255
+
+map_Ka Cube3612_diff.png
+map_Kd Cube3612_diff.png
+map_d Cube3612_diff.png
+
+newmtl Llargehatch2Mtl
+Material Color
+Ka 0 0 0
+Kd 0 0 0
+Ks 0 0 0 
+
+d 0
+
+Ns 255
+
+map_Ka Llargehatch2_diff.png
+map_Kd Llargehatch2_diff.png
+map_d Llargehatch2_diff.png
+
+newmtl Llargehatch3Mtl
+Material Color
+Ka 0 0 0
+Kd 0 0 0
+Ks 0 0 0 
+
+d 0
+
+Ns 255
+
+map_Ka Llargehatch3_diff.png
+map_Kd Llargehatch3_diff.png
+map_d Llargehatch3_diff.png
+
+newmtl Cube3781Mtl
+Material Color
+Ka 0.325037 0.284452 0.166872
+Kd 0.325037 0.284452 0.166872
+Ks 0.216691 0.189635 0.111248 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl Fake4Mtl
+Material Color
+Ka 0 0 0
+Kd 0 0 0
+Ks 0 0 0 
+
+d 0
+
+Ns 255
+
+map_Ka Fake4_diff.png
+map_Kd Fake4_diff.png
+map_d Fake4_diff.png
+
+newmtl Cube3611Mtl
+Material Color
+Ka 0.804559 0.804559 0.804559
+Kd 0.804559 0.804559 0.804559
+Ks 0.536373 0.536373 0.536373 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl Cube3613Mtl
+Material Color
+Ka 0 0 0
+Kd 0 0 0
+Ks 0 0 0 
+
+d 0
+
+Ns 255
+
+map_Ka Cube3613_diff.png
+map_Kd Cube3613_diff.png
+map_d Cube3613_diff.png
+
+newmtl ChestttTheSticker1Mtl
+Material Color
+Ka 0.47044 0.38891 0.227137
+Kd 0.47044 0.38891 0.227137
+Ks 0.313627 0.259274 0.151424 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl StickerOnDaChes1Mtl
+Material Color
+Ka 0.940601 0.940601 0.940601
+Kd 0.940601 0.940601 0.940601
+Ks 0.627067 0.627067 0.627067 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl StickerCgest1Mtl
+Material Color
+Ka 0.00258583 0.00258583 0.00258583
+Kd 0.00258583 0.00258583 0.00258583
+Ks 0.00172388 0.00172388 0.00172388 
+
+d 1
+
+Ns 255
+
+map_Ka Plane0211_diff.png
+map_Kd Plane0211_diff.png
+map_d Plane0211_diff.png
+
+map_Bump Plane0211_nmap.png
+
+map_Ns Plane0211_spec.png
+
+newmtl Fake2Mtl
+Material Color
+Ka 0 0 0
+Kd 0 0 0
+Ks 0 0 0 
+
+d 0
+
+Ns 255
+
+map_Ka Fake2_diff.png
+map_Kd Fake2_diff.png
+map_d Fake2_diff.png
+
+newmtl Fake3Mtl
+Material Color
+Ka 1 1 1
+Kd 1 1 1
+Ks 0.666667 0.666667 0.666667 
+
+d 0
+
+Ns 255
+
+map_Ka Fake3_diff.png
+map_Kd Fake3_diff.png
+map_d Fake3_diff.png
+

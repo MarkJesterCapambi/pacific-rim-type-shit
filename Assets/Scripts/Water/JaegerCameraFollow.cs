@@ -53,6 +53,13 @@ namespace PacificRimWater
         [Header("Freecam / Inspection Mode")]
         [Tooltip("Toggle with 'E' key during gameplay. When true, camera orbits freely around Jaeger without rotating him.")]
         public bool isFreeCam = false;
+        public float freeCamDistance = 24f;
+        public float freeCamMinDistance = 4f;
+        public float freeCamMaxDistance = 80f;
+        public float freeCamMinPitch = -89.5f;
+        public float freeCamMaxPitch = 89.5f;
+        public float freeCamMinY = 0.5f;
+        public float freeCamZoomSpeed = 15f;
 
         private float currentYaw = 0f;
         private float currentPitch = 15f;
@@ -160,19 +167,47 @@ namespace PacificRimWater
             {
                 currentYaw += mouseDeltaX * mouseSensitivity;
                 currentPitch -= mouseDeltaY * mouseSensitivity;
-                currentPitch = Mathf.Clamp(currentPitch, minPitch, maxPitch);
+                float activeMinPitch = isFreeCam ? freeCamMinPitch : minPitch;
+                float activeMaxPitch = isFreeCam ? freeCamMaxPitch : maxPitch;
+                currentPitch = Mathf.Clamp(currentPitch, activeMinPitch, activeMaxPitch);
+            }
+
+            // Scroll-wheel distance zooming in freecam mode
+            if (isFreeCam)
+            {
+                float scroll = 0f;
+                try { scroll = Input.GetAxis("Mouse ScrollWheel"); } catch {}
+#if ENABLE_INPUT_SYSTEM
+                if (UnityEngine.InputSystem.Mouse.current != null)
+                {
+                    scroll += UnityEngine.InputSystem.Mouse.current.scroll.ReadValue().y * 0.005f;
+                }
+#endif
+                if (Mathf.Abs(scroll) > 0.0001f)
+                {
+                    freeCamDistance = Mathf.Clamp(freeCamDistance - scroll * freeCamZoomSpeed, freeCamMinDistance, freeCamMaxDistance);
+                }
             }
 
             Quaternion yawRotation = Quaternion.Euler(0f, currentYaw, 0f);
             Quaternion targetRotation = Quaternion.Euler(currentPitch, currentYaw, 0f);
             float effectiveShoulderOffset = isFreeCam ? 0f : rightShoulderOffset;
-            Vector3 shoulderPivot = target.position + targetOffset + (yawRotation * Vector3.right * effectiveShoulderOffset);
-            Vector3 desiredPosition = shoulderPivot - (targetRotation * Vector3.forward * distance) + Vector3.up * height;
+            float effectiveDistance = isFreeCam ? freeCamDistance : distance;
+            Vector3 orbitCenter = target.position + targetOffset + (yawRotation * Vector3.right * effectiveShoulderOffset) + (isFreeCam ? Vector3.zero : Vector3.up * height);
+            Vector3 desiredPosition = orbitCenter - (targetRotation * Vector3.forward * effectiveDistance);
 
-            if (WaterSystem.Instance != null)
+            if (!isFreeCam)
             {
-                float minCameraY = WaterSystem.Instance.transform.position.y + 2.2f;
-                desiredPosition.y = Mathf.Max(desiredPosition.y, minCameraY);
+                if (WaterSystem.Instance != null)
+                {
+                    float minCameraY = WaterSystem.Instance.transform.position.y + 2.2f;
+                    desiredPosition.y = Mathf.Max(desiredPosition.y, minCameraY);
+                }
+            }
+            else
+            {
+                // In Freecam mode, allow complete underwater exploration down to seabed floor
+                desiredPosition.y = Mathf.Max(desiredPosition.y, freeCamMinY);
             }
 
             if (!hasSmoothedBasePos)
@@ -238,11 +273,11 @@ namespace PacificRimWater
                     (Mathf.Sin(t * 0.80f + 2.2f) * 0.70f + nX * 0.30f) * rollAmp);
             }
 
-            Vector3 aimPoint = shoulderPivot + (targetRotation * Vector3.forward * 120f);
+            Vector3 aimPoint = orbitCenter + (targetRotation * Vector3.forward * 120f);
             Vector3 lookDir = aimPoint - smoothedBasePos;
-            Quaternion baseRotation = lookDir.sqrMagnitude > 0.0001f
-                ? Quaternion.LookRotation(lookDir.normalized, Vector3.up)
-                : targetRotation;
+            Quaternion baseRotation = isFreeCam
+                ? targetRotation
+                : (lookDir.sqrMagnitude > 0.0001f ? Quaternion.LookRotation(lookDir.normalized, Vector3.up) : targetRotation);
 
             transform.position = smoothedBasePos + baseRotation * (swayLocalPos + shakeLocalOffset);
             transform.rotation = baseRotation * Quaternion.Euler(swayEuler + shakeRotOffset);
@@ -262,7 +297,8 @@ namespace PacificRimWater
             }
             else if (isFreeCam)
             {
-                PacificRimUI.JaegerHUD.Instance?.ShowBanner("FREECAM INSPECT ENGAGED // PRESS 'E' TO RE-LOCK", 2.5f);
+                freeCamDistance = distance;
+                PacificRimUI.JaegerHUD.Instance?.ShowBanner("FREECAM INSPECT // UNRESTRICTED ANGLE & UNDERWATER ACTIVE", 2.5f);
             }
         }
 

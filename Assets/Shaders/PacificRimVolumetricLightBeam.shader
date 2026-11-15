@@ -10,13 +10,14 @@ Shader "PacificRim/VolumetricLightBeam"
         _NoiseSpeed("Mist Scroll Speed", Range(0.0, 5.0)) = 1.2
         _NoiseScale("Mist Frequency", Range(1.0, 30.0)) = 8.0
         _NoiseStrength("Mist Ripple Strength", Range(0.0, 1.0)) = 0.28
+        _WaterLevel("Ocean Water Level", Float) = 2.977
     }
 
     SubShader
     {
         Tags
         {
-            "Queue" = "Transparent"
+            "Queue" = "Transparent+100"
             "RenderType" = "Transparent"
             "RenderPipeline" = "UniversalPipeline"
             "IgnoreProjector" = "True"
@@ -38,6 +39,7 @@ Shader "PacificRim/VolumetricLightBeam"
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
 
             struct Attributes
             {
@@ -64,6 +66,7 @@ Shader "PacificRim/VolumetricLightBeam"
                 float _NoiseSpeed;
                 float _NoiseScale;
                 float _NoiseStrength;
+                float _WaterLevel;
             CBUFFER_END
 
             Varyings vert(Attributes input)
@@ -121,8 +124,22 @@ Shader "PacificRim/VolumetricLightBeam"
                 float mistNoise = SmoothNoise(noiseUV) * 0.65 + SmoothNoise(noiseUV * 2.1) * 0.35;
                 float mistMod = 1.0 - (_NoiseStrength * (1.0 - mistNoise));
 
-                // 4. Combine volumetric scattering
-                float alpha = axialWeight * rimFade * mistMod * _Color.a;
+                // 4. Soft termination at ocean water level:
+                // Prevents the air light beam from unnaturally slicing into deep water or sorting under the water surface
+                float waterFade = saturate((input.positionWS.y - (_WaterLevel - 0.5)) * 0.75);
+
+                // 5. Soft depth fade against solid geometry
+                float depthFade = 1.0;
+                #if defined(_CAMERA_DEPTH_TEXTURE) || 1
+                float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
+                float rawDepth = SampleSceneDepth(screenUV);
+                float sceneEyeDepth = LinearEyeDepth(rawDepth, _ZBufferParams);
+                float vertexEyeDepth = input.positionCS.w;
+                depthFade = saturate((sceneEyeDepth - vertexEyeDepth) * 0.35);
+                #endif
+
+                // 6. Combine volumetric scattering
+                float alpha = axialWeight * rimFade * mistMod * waterFade * depthFade * _Color.a;
                 float3 finalColor = _Color.rgb * (_Intensity * alpha);
 
                 // Apply Unity distance fog

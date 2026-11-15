@@ -94,6 +94,17 @@ namespace PacificRimUI.Editor
                 var go = new GameObject("PacificRim_UISoundManager", typeof(AudioSource), typeof(PacificRimUISound));
                 sound = go.GetComponent<PacificRimUISound>();
             }
+
+            // Assign pure mechanical / tactical clips (strictly NO retro chimes)
+            sound.hoverClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Casual Game Sounds U6/CasualGameSounds/DM-CGS-01.wav");
+            sound.clickClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Casual Game Sounds U6/CasualGameSounds/DM-CGS-03.wav");
+            sound.tabClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Casual Game Sounds U6/CasualGameSounds/DM-CGS-03.wav");
+            sound.denyClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Free Pack/Laser Impact Light_6.wav");
+            sound.successClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/SFX/Hydraulic piston mechanical whine.mp3");
+            sound.backClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Casual Game Sounds U6/CasualGameSounds/DM-CGS-03.wav");
+            sound.commClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Free Pack/Laser Impact Light_6.wav");
+            sound.masterVolume = 0.85f;
+
             var src = sound.GetComponent<AudioSource>();
             if (src != null)
             {
@@ -101,6 +112,8 @@ namespace PacificRimUI.Editor
                 src.spatialBlend = 0f;
                 src.ignoreListenerPause = true;
             }
+            EditorUtility.SetDirty(sound);
+            EditorUtility.SetDirty(sound.gameObject);
         }
 
         public static Canvas EnsureCanvas()
@@ -418,11 +431,11 @@ namespace PacificRimUI.Editor
 
             // Header Title
             var titleTxt = CreateStyledText("Pause_Title", dialogGo.transform, PacificRimTextStyle.Heading,
-                "TACTICAL PAUSE // MARK-III STANDBY", PacificRimUITheme.BlueBright, TextAnchor.MiddleCenter, 18, 2, true);
+                "PACIFIC RIM: OPERATION PITFALL", PacificRimUITheme.BlueBright, TextAnchor.MiddleCenter, 18, 2, true);
             SetAnchorTop(titleTxt.rectTransform, 0f, -22f, 520f, 28f);
 
             var subTxt = CreateStyledText("Pause_Subtitle", dialogGo.transform, PacificRimTextStyle.Caption,
-                "PACIFIC DEFENSE COMMAND // DRIFT ARCHIVE ACTIVE", PacificRimUITheme.TextDim, TextAnchor.MiddleCenter, 11, 2, true);
+                "PAN PACIFIC DEFENSE CORPS // TACTICAL ARCHIVE", PacificRimUITheme.TextDim, TextAnchor.MiddleCenter, 11, 2, true);
             SetAnchorTop(subTxt.rectTransform, 0f, -50f, 520f, 20f);
 
             CreateDivider("Pause_Divider", dialogGo.transform, -74f, 480f);
@@ -492,6 +505,7 @@ namespace PacificRimUI.Editor
             SetSerializedField(mainMenu, "controlsModal", controlsModal);
             SetSerializedField(mainMenu, "jaegerHud", hud);
             SetSerializedField(mainMenu, "pauseTitleText", titleTxt);
+            SetSerializedField(mainMenu, "pauseSubtitleText", subTxt);
             SetSerializedField(mainMenu, "pauseHealthText", healthTxt);
             SetSerializedField(mainMenu, "pauseMissionText", stanceTxt);
 
@@ -539,11 +553,11 @@ namespace PacificRimUI.Editor
             var leftCol = CreateRect("Left_HeroColumn", safeArea.transform, new Vector2(0f, 0f), new Vector2(0.58f, 1f), Vector2.zero, Vector2.zero);
 
             // Section Title ("PPDC COMMAND INTERFACE") with 20x2 blue bar + hairline
-            var sectionHeader = BuildSectionTitle("SectionHeader", leftCol.transform, -20f, "PAN PACIFIC DEFENSE CORPS");
+            var sectionHeader = BuildSectionTitle("SectionHeader", leftCol.transform, -20f, "PAN PACIFIC DEFENSE CORPS // THEATER PROTOCOL");
 
-            // Display Title ("GIPSY DANGER")
+            // Display Title ("PACIFIC RIM")
             var pageTitle = CreateStyledText("PageTitle", leftCol.transform, PacificRimTextStyle.Display,
-                "GIPSY DANGER", PacificRimUITheme.Text, TextAnchor.UpperLeft, 52, 2, true);
+                "PACIFIC RIM", PacificRimUITheme.Text, TextAnchor.UpperLeft, 54, 2, true);
             var ptRt = pageTitle.rectTransform;
             ptRt.anchorMin = new Vector2(0f, 1f);
             ptRt.anchorMax = new Vector2(1f, 1f);
@@ -552,7 +566,7 @@ namespace PacificRimUI.Editor
             ptRt.sizeDelta = new Vector2(0f, 68f);
 
             var subTitle = CreateStyledText("SubTitle", leftCol.transform, PacificRimTextStyle.Caption,
-                "MARK-III NUCLEAR VORTEX TURBINE // PACIFIC STORM INTERCEPT", PacificRimUITheme.BlueBright, TextAnchor.MiddleLeft, 14, 2, true);
+                "OPERATION PITFALL // MARK-III NUCLEAR VORTEX TURBINE", PacificRimUITheme.Amber, TextAnchor.MiddleLeft, 14, 2, true);
             var stRt = subTitle.rectTransform;
             stRt.anchorMin = new Vector2(0f, 1f);
             stRt.anchorMax = new Vector2(1f, 1f);
@@ -614,7 +628,7 @@ namespace PacificRimUI.Editor
             vLayout.childForceExpandHeight = false;
 
             var cardDeploy = CreateFeatureCard("Card_Deploy", cardsContainer.transform, 0f, 0f, 114f,
-                "01 // INTERCEPT", "SHATTERDOME LAUNCH", "Typhoon Harbor Patrol // Storm Watch", "READY", PacificRimUITheme.Success);
+                "01 // INTERCEPT", "OPERATION PITFALL", "Typhoon Harbor Patrol // Storm Watch", "READY", PacificRimUITheme.Success);
             var le1 = cardDeploy.GetComponent<LayoutElement>() ?? cardDeploy.gameObject.AddComponent<LayoutElement>();
             le1.preferredHeight = 114f;
             cardDeploy.SetSelected(true);

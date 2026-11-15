@@ -12,6 +12,10 @@ Shader "PacificRim/OceanWater"
         _MicroNormalStrength("Capillary Ripple Strength", Range(0.0, 0.5)) = 0.18
         _MeniscusStrength("Shore/Leg Meniscus Strength", Range(0.0, 1.5)) = 0.45
         _SpecularColor("Specular Glint Color", Color) = (0.95, 0.98, 1.0, 1.0)
+        _NormalMap("Turbulence Normal Map", 2D) = "bump" {}
+        _NormalTiling("Turbulence Tiling", Float) = 0.06
+        _FoamMap("Foam Mask Texture", 2D) = "white" {}
+        _FoamTiling("Foam Tiling", Float) = 0.12
     }
 
     SubShader
@@ -26,7 +30,7 @@ Shader "PacificRim/OceanWater"
 
         Blend SrcAlpha OneMinusSrcAlpha
         ZWrite Off
-        Cull Back
+        Cull Off
 
         Pass
         {
@@ -72,7 +76,14 @@ Shader "PacificRim/OceanWater"
                 float  _MicroNormalStrength;
                 float  _MeniscusStrength;
                 float4 _SpecularColor;
+                float  _NormalTiling;
+                float  _FoamTiling;
             CBUFFER_END
+
+            TEXTURE2D(_NormalMap);
+            SAMPLER(sampler_NormalMap);
+            TEXTURE2D(_FoamMap);
+            SAMPLER(sampler_FoamMap);
 
             // Global uniforms pushed once per frame from WaterSystem & OceanWaterMesh (outside UnityPerMaterial for SRP Batcher)
             float4 _OceanSwell1;
@@ -379,7 +390,20 @@ Shader "PacificRim/OceanWater"
                 float distFade = lerp(0.18, 1.0, exp(-camDist * 0.012));
                 float3 macroN = normalize(input.normalWS);
                 float3 microN = EvaluateCapillaryNormal(input.positionWS.xz, t, _MicroNormalStrength * distFade);
-                float3 normalWS = normalize(float3(macroN.x + microN.x, macroN.y, macroN.z + microN.z));
+
+                float2 normUV1 = input.positionWS.xz * _NormalTiling + _GlobalWindVector.xy * (t * 0.04);
+                float2 normUV2 = input.positionWS.xz * (_NormalTiling * 2.1) - _GlobalWindVector.xy * (t * 0.06);
+                half4 nSample1 = SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, normUV1);
+                half4 nSample2 = SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, normUV2);
+                float3 n1 = UnpackNormal(nSample1);
+                float3 n2 = UnpackNormal(nSample2);
+                float3 texN = normalize(float3(n1.xy + n2.xy, n1.z));
+
+                float3 normalWS = normalize(float3(macroN.x + microN.x + texN.x * 0.35 * distFade, macroN.y, macroN.z + microN.z + texN.y * 0.35 * distFade));
+                if (dot(normalWS, viewDirWS) < 0.0)
+                {
+                    normalWS = -normalWS;
+                }
 
                 float NdotV = saturate(dot(normalWS, viewDirWS));
 
@@ -463,6 +487,10 @@ Shader "PacificRim/OceanWater"
                 float bubbles = smoothstep(0.22, 0.05, cell);
                 float bubbleRim = smoothstep(0.03, 0.09, cell) * smoothstep(0.20, 0.11, cell);
                 float fineFizz = smoothstep(0.16, 0.03, cellFine);
+
+                float2 foamUV = input.positionWS.xz * _FoamTiling + _GlobalWindVector.xy * (t * 0.03);
+                half foamSample = SAMPLE_TEXTURE2D(_FoamMap, sampler_FoamMap, foamUV).r;
+                bubbles = lerp(bubbles, bubbles * foamSample * 1.35, 0.65);
 
                 float bigCrest = smoothstep(1.95, 4.8, elev);
                 float minorCrest = smoothstep(0.70, 1.75, elev) * (1.0 - bigCrest * 0.6);

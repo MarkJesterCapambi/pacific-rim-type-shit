@@ -240,6 +240,11 @@ namespace PacificRimWater
                     {
                         PacificRimAtmosphere.AtmosphereAudioController.Instance.TriggerThunderMuffle(0.92f, 0.85f);
                     }
+
+                    if (PacificRimAudio.PacificRimAudioManager.Instance != null)
+                    {
+                        PacificRimAudio.PacificRimAudioManager.Instance.PlayLightningStrike(center);
+                    }
                 }
 
                 boltHideTime = Time.time + Mathf.Max(0.05f, boltDuration);

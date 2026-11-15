@@ -53,6 +53,8 @@ namespace PacificRimWater
         public SimpleJaegerController targetJaeger;
         public Animator animator;
         public float detectionRange = 400f;
+        [Tooltip("True while pre-fight cutscenes are running; freezes Kaiju AI and suppresses movement.")]
+        public bool isCutsceneMode = false;
 
         [Header("Boss Phases, Health, Poise & Guard")]
         public float maxHealth = 4200f;
@@ -68,27 +70,27 @@ namespace PacificRimWater
         public float phase3HealAmount = 450f;
 
         [Header("Locomotion & Combat Ranges")]
-        [Tooltip("Leatherback walks faster than Gipsy (8.5 m/s) to apply relentless neutral pressure.")]
-        public float walkSpeed = 10.5f;
-        [Tooltip("Leatherback sprints slower than Gipsy's 22.5 m/s sprint so the player can outrun/space charges.")]
-        public float sprintSpeed = 17.5f;
-        public float empWalkSpeed = 12.2f;
-        public float empSprintSpeed = 19.0f;
-        public float backwardWalkSpeed = 8.8f;
-        public float backwardSprintSpeed = 15.5f;
-        public float strafeSpeed = 6.8f;
+        [Tooltip("Leatherback walks slower after balance tuning to give Gipsy breathing room.")]
+        public float walkSpeed = 7.0f;
+        [Tooltip("Leatherback charge sprint speed.")]
+        public float sprintSpeed = 11.67f;
+        public float empWalkSpeed = 8.13f;
+        public float empSprintSpeed = 12.67f;
+        public float backwardWalkSpeed = 5.87f;
+        public float backwardSprintSpeed = 10.33f;
+        public float strafeSpeed = 4.53f;
         public float turnSpeed = 115f;
         public float attackTurnSpeed = 46f;
         public float acceleration = 4.8f;
-        public float minCombatDistance = 16.5f;
-        public float meleeAttackRange = 23.5f;
-        public float sprintMinRange = 25.0f;
+        public float minCombatDistance = 13.5f;
+        public float meleeAttackRange = 19.5f;
+        public float sprintMinRange = 20.5f;
 
         [Header("Combat Attacks & Bio-EMP Overcharge")]
         public float lightPunchDamage = 27.5f;
         public float heavySlamDamage = 52.5f;
-        public float punchStrikeRadius = 14.5f;
-        public float slamStrikeRadius = 17.0f;
+        public float punchStrikeRadius = 11.5f;
+        public float slamStrikeRadius = 13.5f;
         public float empBuffDuration = 18.0f;
         public float empCooldownDuration = 20.0f;
         public float initialEmpDelay = 5.0f;
@@ -221,7 +223,7 @@ namespace PacificRimWater
             rb = GetComponent<Rigidbody>();
             rb.freezeRotation = true;
             rb.useGravity = false;
-            rb.constraints = RigidbodyConstraints.FreezeRotation | RigidbodyConstraints.FreezePositionY;
+            rb.constraints = RigidbodyConstraints.FreezeRotation;
 
             currentBodyYaw = transform.eulerAngles.y;
             bodyYawInitialized = true;
@@ -308,18 +310,15 @@ namespace PacificRimWater
 
         private void IgnorePlatformCollisions()
         {
-            GameObject platform = GameObject.Find("Test_Platform");
-            if (platform == null) return;
-
-            var platCols = platform.GetComponentsInChildren<Collider>(true);
             var myCols = GetComponentsInChildren<Collider>(true);
-            foreach (var myCol in myCols)
+            foreach (var col in Object.FindObjectsByType<Collider>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
-                foreach (var platCol in platCols)
+                if (col == null || col.transform.IsChildOf(transform)) continue;
+                if (col.CompareTag("Ground") || col.gameObject.name.Contains("Platform") || col.gameObject.name.Contains("Ramp") || col.gameObject.name.Contains("Deck"))
                 {
-                    if (myCol != null && platCol != null)
+                    foreach (var myCol in myCols)
                     {
-                        Physics.IgnoreCollision(myCol, platCol, true);
+                        if (myCol != null) Physics.IgnoreCollision(myCol, col, true);
                     }
                 }
             }
@@ -381,6 +380,14 @@ namespace PacificRimWater
                     deathLoopEntered = true;
                     CrossFadeState("DeathLoop", 0.35f);
                 }
+                return;
+            }
+
+            if (isCutsceneMode)
+            {
+                desiredVelocity = Vector3.zero;
+                SetLocomotionSpeed(0f);
+                CrossFadeState("Idle", 0.25f);
                 return;
             }
 
@@ -504,16 +511,28 @@ namespace PacificRimWater
                 return;
             }
 
+            // Ground elevation tracking across seabed, ramps, and elevated city decks
+            float groundY = 0f;
+            if (Physics.Raycast(transform.position + Vector3.up * 40f, Vector3.down, out RaycastHit groundHit, 90f, LayerMask.GetMask("Default"), QueryTriggerInteraction.Ignore))
+            {
+                if (!groundHit.transform.IsChildOf(transform))
+                {
+                    groundY = groundHit.point.y;
+                }
+            }
+            float targetY = groundY + 2.0f;
+            float vertVel = Mathf.Clamp((targetY - rb.position.y) * 8f, -20f, 20f);
+
 #if UNITY_6000_0_OR_NEWER
             Vector3 currentVel = rb.linearVelocity;
             Vector3 horiz = new Vector3(currentVel.x, 0f, currentVel.z);
             Vector3 nextHoriz = Vector3.Lerp(horiz, desiredVelocity, Time.fixedDeltaTime * acceleration);
-            rb.linearVelocity = new Vector3(nextHoriz.x, 0f, nextHoriz.z);
+            rb.linearVelocity = new Vector3(nextHoriz.x, vertVel, nextHoriz.z);
 #else
             Vector3 currentVel = rb.velocity;
             Vector3 horiz = new Vector3(currentVel.x, 0f, currentVel.z);
             Vector3 nextHoriz = Vector3.Lerp(horiz, desiredVelocity, Time.fixedDeltaTime * acceleration);
-            rb.velocity = new Vector3(nextHoriz.x, 0f, nextHoriz.z);
+            rb.velocity = new Vector3(nextHoriz.x, vertVel, nextHoriz.z);
 #endif
 
             if (bodyYawInitialized)
@@ -1130,6 +1149,14 @@ namespace PacificRimWater
         {
             if (IsDead || IsAIDisabled || currentState == AIState.PhaseTransition || currentState == AIState.EmpRoar) return;
             if (currentState == AIState.Blocking || currentState == AIState.Staggered) return;
+            if (isCutsceneMode)
+            {
+                desiredVelocity = Vector3.zero;
+                SetLocomotionSpeed(0f);
+                CrossFadeState("Idle", 0.25f);
+                return;
+            }
+
             if (targetJaeger == null || targetJaeger.IsDead) return;
 
             if (IsBaguvixActive)
@@ -1368,7 +1395,19 @@ namespace PacificRimWater
             {
                 PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuSlamImpact(impactPos);
             }
+            else
+            {
+                PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuBite(impactPos);
+            }
             EmitOceanImpact(impactPos, transform.forward, isHeavy ? slamWaveRadius : 16f, isHeavy ? slamWaveStrength : 0.22f, isHeavy ? 2.6f : 1.4f, isHeavy, isHeavy ? 1.5f : 0.8f);
+
+            if (isCutsceneMode)
+            {
+                desiredVelocity = Vector3.zero;
+                SetLocomotionSpeed(0f);
+                CrossFadeState("Idle", 0.25f);
+                return;
+            }
 
             if (targetJaeger == null || targetJaeger.IsDead) return;
 
@@ -1385,7 +1424,7 @@ namespace PacificRimWater
             {
                 Vector3 kbDir = rootDist > 0.01f ? (flatToJaeger / rootDist) : transform.forward;
                 float phaseDamageMult = CurrentPhase == 3 ? 1.15f : 1.0f;
-                targetJaeger.TakeDamage(damage * phaseDamageMult, kbDir * knockbackImpulse, isHeavy);
+                targetJaeger.TakeDamage(damage * phaseDamageMult, kbDir * knockbackImpulse, isHeavy, impactPos);
             }
         }
 
@@ -1411,6 +1450,32 @@ namespace PacificRimWater
             SetLocomotionSpeed(1f);
             CrossFadeState(staggerState, 0.08f, true);
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuStaggerPain(transform.position + Vector3.up * 14f);
+        }
+
+        /// <summary>
+        /// Instantly staggers the Kaiju upon being parried by Gipsy Danger:
+        /// cancels any active attack sequence, pushes the Kaiju backward with recoil, and opens a damage window without dealing damage.
+        /// </summary>
+        public void TriggerParryStagger(Vector3 recoilForce)
+        {
+            if (IsDead) return;
+
+            CancelActiveSequence();
+            currentState = AIState.Staggered;
+            stateTimer = 2.2f;
+            counterQueued = false;
+            consecutiveStaggers = 0;
+            desiredVelocity = Vector3.zero;
+            SetLocomotionSpeed(1f);
+
+            if (rb != null && recoilForce.sqrMagnitude > 0.01f)
+            {
+                rb.AddForce(recoilForce, ForceMode.Impulse);
+            }
+
+            CrossFadeState("StaggerUp", 0.06f, true);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuStaggerPain(transform.position + Vector3.up * 14f);
+            Debug.Log("<color=#ffd700><b>[Kaiju AI]</b></color> Deflected by Gipsy's PERFECT PARRY! Staggered for 2.2s without taking direct parry damage.");
         }
 
         public void TakeDamage(float amount, Vector3 knockback, int attackVariant = 0, Vector3 hitPoint = default)
@@ -1565,6 +1630,7 @@ namespace PacificRimWater
             CrossFadeState("Death", 0.18f, true);
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuDeathCollapse(transform.position + Vector3.up * 10f);
             StartCoroutine(DeathSplashRoutine());
+            StartCoroutine(VictorySequenceRoutine());
             Debug.Log("<color=#00e5ff><b>[KAIJU NEUTRALIZED]</b></color> Leatherback collapses into the Pacific!");
         }
 
@@ -1572,6 +1638,24 @@ namespace PacificRimWater
         {
             yield return new WaitForSeconds(1.8f);
             EmitOceanImpact(transform.position + transform.forward * 4f, Vector3.up, 32f, 0.38f, 3.5f, true, 1.8f);
+        }
+
+        private IEnumerator VictorySequenceRoutine()
+        {
+            // Give time for Leatherback's collapse into the Pacific waves
+            yield return new WaitForSeconds(1.2f);
+            if (targetJaeger != null && !targetJaeger.IsDead)
+            {
+                targetJaeger.TriggerVictoryPose();
+            }
+            else if (SimpleJaegerController.Instance != null && !SimpleJaegerController.Instance.IsDead)
+            {
+                SimpleJaegerController.Instance.TriggerVictoryPose();
+            }
+
+            // Allow Gipsy Danger's battle victory roar to ring out across the storm
+            yield return new WaitForSeconds(2.8f);
+            PacificRimUI.MainMenuUI.Instance?.SetVictoryState();
         }
 
         private void TrackFootsteps()

@@ -962,6 +962,18 @@ namespace PacificRimWater.Editor
             return oceanBaseY;
         }
 
+        [MenuItem("Pacific Rim/Setup Arena Invisible Barriers", false, 9)]
+        public static void SetupArenaInvisibleBarriersMenu()
+        {
+            SetupArenaBarriers.CreateArenaBarriers();
+        }
+
+        [MenuItem("Pacific Rim/Inspect Buildings FBX", false, 11)]
+        public static void InspectBuildingsFbxMenu()
+        {
+            SetupPacificRimCity.InspectBuildingsFbx();
+        }
+
         [MenuItem("Pacific Rim/Setup Ocean Wading Scene", false, 10)]
         public static void CreatePacificRimOceanScene()
         {
@@ -2302,6 +2314,7 @@ namespace PacificRimWater.Editor
             if (audioCtrl == null) audioCtrl = atmoRoot.AddComponent<AtmosphereAudioController>();
             Undo.RecordObject(audioCtrl, "Configure AtmosphereAudioController");
             audioCtrl.EnsureAudioSources();
+            audioCtrl.EnsureRealClips();
 
             // 6. Background Scale Elements - Distant Megastructure / Sea Wall
             GameObject seaWallObj = GameObject.Find("Megastructure_SeaWall");

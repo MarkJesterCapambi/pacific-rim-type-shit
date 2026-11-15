@@ -5,8 +5,8 @@ namespace PacificRimAtmosphere
 {
     /// <summary>
     /// Manages the heavy industrial storm audio scape and dynamic low-pass frequency filtering:
-    /// - Procedural scheduling of distant coastal sirens, foghorn blasts, and groaning metal stress.
-    /// - Generates synthetic procedural audio clips on-the-fly when custom audio assets are not provided.
+    /// - Realistic scheduled distant coastal sirens, foghorn blasts, and groaning metal stress
+    ///   powered by authentic studio audio clips from Free Pack and SFX.
     /// - Dynamically drives an AudioLowPassFilter on the camera to muffle high frequencies
     ///   following thunderclaps/sub-bass impacts and when near the water surface.
     /// </summary>
@@ -20,18 +20,18 @@ namespace PacificRimAtmosphere
         public AudioSource foghornSource;
         public AudioSource metalCreakSource;
 
-        [Header("Custom Audio Clips (Optional)")]
-        public AudioClip customSirenClip;
-        public AudioClip customFoghornClip;
-        public AudioClip customMetalCreakClip;
+        [Header("Authentic Audio Clips")]
+        public AudioClip sirenClip;
+        public AudioClip foghornClip;
+        public AudioClip metalCreakClip;
 
         [Header("Scheduling Intervals")]
-        public float minSirenInterval = 28f;
-        public float maxSirenInterval = 55f;
-        public float minFoghornInterval = 18f;
-        public float maxFoghornInterval = 38f;
-        public float minMetalCreakInterval = 12f;
-        public float maxMetalCreakInterval = 26f;
+        public float minSirenInterval = 32f;
+        public float maxSirenInterval = 65f;
+        public float minFoghornInterval = 22f;
+        public float maxFoghornInterval = 45f;
+        public float minMetalCreakInterval = 14f;
+        public float maxMetalCreakInterval = 28f;
 
         [Header("Dynamic Audio Low-Pass Filter")]
         public bool enableDynamicLowPass = true;
@@ -50,14 +50,10 @@ namespace PacificRimAtmosphere
         private float targetLowPassCutoff = 22000f;
         private float muffleHoldTimer = 0f;
 
-        private AudioClip proceduralSirenClip;
-        private AudioClip proceduralFoghornClip;
-        private AudioClip proceduralMetalCreakClip;
-
         void Awake()
         {
             EnsureAudioSources();
-            EnsureProceduralClips();
+            EnsureRealClips();
         }
 
         void OnEnable()
@@ -66,7 +62,7 @@ namespace PacificRimAtmosphere
                 Instance = this;
 
             EnsureAudioSources();
-            EnsureProceduralClips();
+            EnsureRealClips();
             EnsureCameraLowPassFilter();
 
             ScheduleEvents();
@@ -92,9 +88,35 @@ namespace PacificRimAtmosphere
 
         public void EnsureAudioSources()
         {
-            if (sirenSource == null) sirenSource = CreateAudioSource("SirenSource", 0.45f);
-            if (foghornSource == null) foghornSource = CreateAudioSource("FoghornSource", 0.65f);
-            if (metalCreakSource == null) metalCreakSource = CreateAudioSource("MetalCreakSource", 0.50f);
+            if (sirenSource == null) sirenSource = CreateAudioSource("SirenSource", 0.40f);
+            if (foghornSource == null) foghornSource = CreateAudioSource("FoghornSource", 0.60f);
+            if (metalCreakSource == null) metalCreakSource = CreateAudioSource("MetalCreakSource", 0.45f);
+        }
+
+        public void EnsureRealClips()
+        {
+            var audioMgr = PacificRimAudio.PacificRimAudioManager.Instance;
+            if (audioMgr != null)
+            {
+                if (sirenClip == null) sirenClip = audioMgr.GetClip("Computer explosion 6 - Alarm");
+                if (foghornClip == null) foghornClip = audioMgr.GetClip("GipsyFoghorn");
+                if (metalCreakClip == null) metalCreakClip = audioMgr.GetClip("JaegerArmorCreak_01");
+            }
+
+#if UNITY_EDITOR
+            if (sirenClip == null)
+            {
+                sirenClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Free Pack/Computer explosion 6 - Alarm.wav");
+            }
+            if (foghornClip == null)
+            {
+                foghornClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/SFX/GipsyFoghorn.mp3");
+            }
+            if (metalCreakClip == null)
+            {
+                metalCreakClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/SFX/JaegerArmorCreak_01.mp3");
+            }
+#endif
         }
 
         private AudioSource CreateAudioSource(string childName, float volume)
@@ -158,34 +180,28 @@ namespace PacificRimAtmosphere
 
         public void PlaySiren()
         {
-            if (customSirenClip == null) return; // Do not play procedural temporary placeholder SFX
-            AudioClip clip = customSirenClip;
-            if (clip != null && sirenSource != null)
+            if (sirenClip != null && sirenSource != null)
             {
-                sirenSource.pitch = Random.Range(0.92f, 1.05f);
-                sirenSource.PlayOneShot(clip, sirenSource.volume);
+                sirenSource.pitch = Random.Range(0.94f, 1.04f);
+                sirenSource.PlayOneShot(sirenClip, sirenSource.volume);
             }
         }
 
         public void PlayFoghorn()
         {
-            if (customFoghornClip == null) return; // Do not play procedural temporary placeholder SFX
-            AudioClip clip = customFoghornClip;
-            if (clip != null && foghornSource != null)
+            if (foghornClip != null && foghornSource != null)
             {
-                foghornSource.pitch = Random.Range(0.88f, 1.04f);
-                foghornSource.PlayOneShot(clip, foghornSource.volume);
+                foghornSource.pitch = Random.Range(0.92f, 1.02f);
+                foghornSource.PlayOneShot(foghornClip, foghornSource.volume);
             }
         }
 
         public void PlayMetalCreak()
         {
-            if (customMetalCreakClip == null) return; // Do not play procedural temporary placeholder SFX
-            AudioClip clip = customMetalCreakClip;
-            if (clip != null && metalCreakSource != null)
+            if (metalCreakClip != null && metalCreakSource != null)
             {
-                metalCreakSource.pitch = Random.Range(0.85f, 1.15f);
-                metalCreakSource.PlayOneShot(clip, metalCreakSource.volume);
+                metalCreakSource.pitch = Random.Range(0.88f, 1.12f);
+                metalCreakSource.PlayOneShot(metalCreakClip, metalCreakSource.volume);
             }
         }
 
@@ -225,7 +241,14 @@ namespace PacificRimAtmosphere
                 float seaY = WaterSystem.Instance.GetWaterHeight(camPos);
                 float distToSea = camPos.y - seaY;
 
-                if (distToSea < waterSurfaceMuffleThreshold)
+                if (distToSea < 0f)
+                {
+                    // Fully submerged underwater: deep underwater acoustics muffle
+                    float depthFactor = Mathf.Clamp01(-distToSea / 12f);
+                    float underwaterCutoff = Mathf.Lerp(waterProximityCutoff, 360f, depthFactor);
+                    targetLowPassCutoff = Mathf.Min(targetLowPassCutoff, underwaterCutoff);
+                }
+                else if (distToSea < waterSurfaceMuffleThreshold)
                 {
                     float factor = Mathf.Clamp01((waterSurfaceMuffleThreshold - distToSea) / waterSurfaceMuffleThreshold);
                     float surfaceCutoff = Mathf.Lerp(normalCutoffFrequency, waterProximityCutoff, factor);
@@ -236,98 +259,5 @@ namespace PacificRimAtmosphere
             currentLowPassCutoff = Mathf.Lerp(currentLowPassCutoff, targetLowPassCutoff, dt * lowPassRecoverySpeed);
             cameraLowPassFilter.cutoffFrequency = currentLowPassCutoff;
         }
-
-        #region Procedural Audio Synthesizers
-
-        private void EnsureProceduralClips()
-        {
-            if (proceduralSirenClip == null) proceduralSirenClip = GenerateProceduralSirenClip();
-            if (proceduralFoghornClip == null) proceduralFoghornClip = GenerateProceduralFoghornClip();
-            if (proceduralMetalCreakClip == null) proceduralMetalCreakClip = GenerateProceduralMetalCreakClip();
-        }
-
-        private AudioClip GenerateProceduralSirenClip()
-        {
-            int sampleRate = 44100;
-            float duration = 4.2f;
-            int count = (int)(sampleRate * duration);
-            float[] samples = new float[count];
-
-            float phase = 0f;
-            for (int i = 0; i < count; i++)
-            {
-                float t = (float)i / sampleRate;
-                float freq = Mathf.Lerp(440f, 720f, 0.5f + 0.5f * Mathf.Sin(t * 1.8f));
-                phase += 2f * Mathf.PI * freq / sampleRate;
-
-                float envelope = Mathf.Sin(Mathf.PI * (t / duration));
-                float wave = Mathf.Sin(phase) * 0.6f + Mathf.Sin(phase * 2f) * 0.25f + Mathf.Sin(phase * 3f) * 0.15f;
-                samples[i] = wave * envelope * 0.45f;
-            }
-
-            var clip = AudioClip.Create("Proc_CoastalSiren", count, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        private AudioClip GenerateProceduralFoghornClip()
-        {
-            int sampleRate = 44100;
-            float duration = 3.5f;
-            int count = (int)(sampleRate * duration);
-            float[] samples = new float[count];
-
-            float phase = 0f;
-            float f0 = 74.0f;
-            for (int i = 0; i < count; i++)
-            {
-                float t = (float)i / sampleRate;
-                phase += 2f * Mathf.PI * f0 / sampleRate;
-
-                float attack = Mathf.Clamp01(t / 0.4f);
-                float decay = Mathf.Clamp01((duration - t) / 0.8f);
-                float envelope = attack * decay;
-
-                float wave = Mathf.Sin(phase) * 0.55f
-                           + Mathf.Sin(phase * 2f) * 0.30f
-                           + Mathf.Sin(phase * 3f) * 0.15f
-                           + Mathf.Sin(phase * 4f) * 0.08f;
-
-                samples[i] = wave * envelope * 0.65f;
-            }
-
-            var clip = AudioClip.Create("Proc_OceanFoghorn", count, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        private AudioClip GenerateProceduralMetalCreakClip()
-        {
-            int sampleRate = 44100;
-            float duration = 2.4f;
-            int count = (int)(sampleRate * duration);
-            float[] samples = new float[count];
-
-            var rng = new System.Random(1337);
-            float phase = 0f;
-            for (int i = 0; i < count; i++)
-            {
-                float t = (float)i / sampleRate;
-                float freqMod = 95f + Mathf.Sin(t * 8.5f) * 35f;
-                phase += 2f * Mathf.PI * freqMod / sampleRate;
-
-                float envelope = Mathf.Sin(Mathf.PI * (t / duration));
-                float noise = (float)(rng.NextDouble() * 2.0 - 1.0) * 0.12f;
-                float wave = (Mathf.Sin(phase) * 0.5f + Mathf.Sin(phase * 1.5f) * 0.3f + noise);
-
-                samples[i] = wave * envelope * 0.45f;
-            }
-
-            var clip = AudioClip.Create("Proc_MetalCreak", count, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        #endregion
     }
 }

@@ -594,6 +594,81 @@ namespace PacificRimWater
         }
 
         /// <summary>
+        /// Cataclysmic ocean impact splash when Gipsy Danger (2,000 tons) is released from aerial suspension
+        /// and crashes down into the ocean: creates a massive 360-degree crown of hundreds of soaring droplets,
+        /// violent rising mist geysers, turbulent foam rings expanding outward, and water displacement shockwaves.
+        /// </summary>
+        public void SpawnColossalTitanDropSplash(Vector3 impactPoint)
+        {
+            if (float.IsNaN(impactPoint.x) || float.IsNaN(impactPoint.y) || float.IsNaN(impactPoint.z)) return;
+            EnsureSystems();
+
+            Vector3 surfacePos = impactPoint;
+            if (WaterSystem.Instance != null)
+            {
+                surfacePos.y = WaterSystem.Instance.GetWaterHeight(impactPoint);
+            }
+
+            // 1. Massive 360-degree droplet eruption (240 droplets flying up to 28m high and radially outward)
+            int dropletCount = 240;
+            for (int i = 0; i < dropletCount; i++)
+            {
+                float ang = Random.Range(0f, Mathf.PI * 2f);
+                Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+
+                bool highJet = (i % 3) == 0;
+                float r0 = Random.Range(0.4f, 4.5f);
+                Vector3 spawnPos = surfacePos + radial * r0 + Vector3.up * Random.Range(0.2f, 1.2f);
+
+                float upVel = highJet ? Random.Range(20f, 32f) : Random.Range(10f, 22f);
+                float radialVel = highJet ? Random.Range(4f, 12f) : Random.Range(12f, 26f);
+                Vector3 vel = radial * radialVel + Vector3.up * upVel;
+
+                float dropSize = Random.Range(0.45f, 1.35f);
+                EmitDroplet(spawnPos, vel, dropSize);
+            }
+
+            // 2. Rising geyser mist clouds (26 billowing mist puffs)
+            int mistCount = 26;
+            for (int i = 0; i < mistCount; i++)
+            {
+                float ang = Random.Range(0f, Mathf.PI * 2f);
+                Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                Vector3 off = radial * Random.Range(1f, 8.5f) + Vector3.up * Random.Range(0.5f, 2.5f);
+                Vector3 vel = radial * Random.Range(2.5f, 8.0f) + Vector3.up * Random.Range(4.0f, 9.5f);
+                EmitMist(surfacePos + off, vel, Random.Range(6.5f, 14.0f), Random.Range(0.55f, 0.85f));
+            }
+
+            // 3. Boiling frothing ocean foam ring (38 expanding foam patches)
+            int foamCount = 38;
+            for (int i = 0; i < foamCount; i++)
+            {
+                float ang = Random.Range(0f, Mathf.PI * 2f);
+                Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                float r0 = Random.Range(1.5f, 7.5f);
+                Vector3 foamVel = radial * Random.Range(4.0f, 9.5f);
+                EmitFoam(surfacePos + radial * r0, foamVel, Random.Range(3.5f, 7.5f));
+            }
+
+            // 4. Heavy cavitation bubbles (45 bubbles churning in the impact wake)
+            int bubbleCount = 45;
+            for (int i = 0; i < bubbleCount; i++)
+            {
+                float ang = Random.Range(0f, Mathf.PI * 2f);
+                Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                float r0 = Random.Range(0.5f, 5.5f);
+                Vector3 bubbleVel = radial * Random.Range(1.2f, 4.5f);
+                EmitBubble(surfacePos + radial * r0, Random.Range(0.35f, 0.85f), bubbleVel);
+            }
+
+            // 5. Huge kinetic ocean surface wave ripple
+            if (WaterSystem.Instance != null)
+            {
+                WaterSystem.Instance.AddFootstepWave(surfacePos, 50f, 0.95f);
+            }
+        }
+
+        /// <summary>
         /// Splash of a big wave slapping against armor (torso, arms, hips...). The contact point should
         /// lie on/near the armor surface; spray peels off in the outward direction and is clip-guarded.
         /// </summary>
@@ -737,6 +812,45 @@ namespace PacificRimWater
                 emit.velocity = dir * speed + Vector3.up * Random.Range(1.5f, 6.0f);
                 emit.startLifetime = Random.Range(0.18f, 0.48f);
                 emit.startSize = Random.Range(0.28f, isHeavy ? 0.75f : 0.58f);
+                emit.startColor = col;
+                emit.applyShapeToPosition = false;
+                sparks.Emit(emit, 1);
+            }
+        }
+
+        /// <summary>
+        /// Emits a brilliant radial golden/white plasma spark burst when Gipsy Danger perfectly parries an incoming Kaiju strike.
+        /// </summary>
+        public void SpawnParrySparks(Vector3 impactPoint, Vector3 outwardNormal)
+        {
+            if (float.IsNaN(impactPoint.x) || float.IsNaN(impactPoint.y) || float.IsNaN(impactPoint.z)) return;
+            EnsureSystems();
+            if (sparks == null) return;
+
+            Vector3 n = outwardNormal.sqrMagnitude > 0.001f ? outwardNormal.normalized : Vector3.up;
+            int count = 145;
+
+            Color cGold = new Color(1.0f, 0.85f, 0.20f, 1f);
+            Color cWhite = new Color(1.0f, 1.0f, 0.95f, 1f);
+            Color cAmber = new Color(1.0f, 0.65f, 0.10f, 1f);
+
+            for (int i = 0; i < count; i++)
+            {
+                Vector3 dir = Vector3.Slerp(n, Random.onUnitSphere, Random.Range(0.12f, 0.95f));
+                if (dir.y < -0.2f) dir.y = Mathf.Abs(dir.y) * 0.5f;
+                dir.Normalize();
+
+                float speed = Random.Range(26f, 48f);
+                Vector3 pos = impactPoint + Random.insideUnitSphere * 1.2f;
+
+                float roll = Random.value;
+                Color32 col = roll < 0.45f ? cWhite : (roll < 0.85f ? cGold : cAmber);
+
+                emit = new ParticleSystem.EmitParams();
+                emit.position = pos;
+                emit.velocity = dir * speed + Vector3.up * Random.Range(2.0f, 7.0f);
+                emit.startLifetime = Random.Range(0.20f, 0.55f);
+                emit.startSize = Random.Range(0.40f, 0.95f);
                 emit.startColor = col;
                 emit.applyShapeToPosition = false;
                 sparks.Emit(emit, 1);
