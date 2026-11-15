@@ -135,7 +135,7 @@ namespace PacificRimCutscene
             mainCamera = Camera.main;
             if (mainCamera != null)
             {
-                cameraFollowScript = mainCamera.GetComponent("PacificRimCameraFollow") as MonoBehaviour;
+                cameraFollowScript = mainCamera.GetComponent<PacificRimWater.JaegerCameraFollow>();
             }
 
             EnsureLetterboxUI();
@@ -155,6 +155,16 @@ namespace PacificRimCutscene
                 letterboxCanvasGroup = existing.GetComponent<CanvasGroup>();
                 topBar = existing.Find("TopBar") as RectTransform;
                 bottomBar = existing.Find("BottomBar") as RectTransform;
+                if (topBar != null)
+                {
+                    var topImage = topBar.GetComponent<Image>();
+                    if (topImage != null) topImage.color = Color.black;
+                }
+                if (bottomBar != null)
+                {
+                    var botImage = bottomBar.GetComponent<Image>();
+                    if (botImage != null) botImage.color = Color.black;
+                }
                 var skip = existing.Find("SkipPrompt");
                 if (skip != null) skipPromptText = skip.GetComponent<Text>();
                 return;
@@ -182,7 +192,7 @@ namespace PacificRimCutscene
             topBar.pivot = new Vector2(0.5f, 1f);
             topBar.sizeDelta = new Vector2(0f, 135f);
             var topImg = topGo.GetComponent<Image>();
-            topImg.color = new Color(0.04f, 0.05f, 0.06f, 1f);
+            topImg.color = Color.black;
 
             // Bottom Bar
             var botGo = new GameObject("BottomBar", typeof(RectTransform), typeof(Image));
@@ -193,7 +203,7 @@ namespace PacificRimCutscene
             bottomBar.pivot = new Vector2(0.5f, 0f);
             bottomBar.sizeDelta = new Vector2(0f, 135f);
             var botImg = botGo.GetComponent<Image>();
-            botImg.color = new Color(0.04f, 0.05f, 0.06f, 1f);
+            botImg.color = Color.black;
 
             // Skip Prompt
             var skipGo = new GameObject("SkipPrompt", typeof(RectTransform), typeof(Text));
@@ -301,10 +311,15 @@ namespace PacificRimCutscene
             SpawnChinookSquadron();
             StartChinookAudio();
 
-            // 6. Take control of camera for cinematic tracking
+            // 6. Enable zoomed-out Cutscene FreeCam so the player sees the full stormy environment,
+            // with mouse look orbit and Arrow Up / Arrow Down distance zoom
             if (cameraFollowScript != null)
             {
-                cameraFollowScript.enabled = false;
+                cameraFollowScript.enabled = true;
+            }
+            if (PacificRimWater.JaegerCameraFollow.Instance != null)
+            {
+                PacificRimWater.JaegerCameraFollow.Instance.EnableCutsceneFreeCam(initialDistance: 72f, initialPitch: 20f);
             }
 
             // Stage 1: Convoy Approach (glide smoothly from airborneStartPosition to airborneReleasePosition)
@@ -486,6 +501,8 @@ namespace PacificRimCutscene
         private void UpdateCinematicCamera(Vector3 jaegerPos, float progress)
         {
             if (mainCamera == null) return;
+            // When cutscene freecam is active, player has full mouse orbit and arrow zoom control
+            if (PacificRimWater.JaegerCameraFollow.Instance != null && PacificRimWater.JaegerCameraFollow.Instance.isCutsceneFreeCam) return;
 
             // Phase 1: Low-angle dramatic convoy shot framing Gipsy hanging suspended under the soaring Chinooks
             // Phase 2: Orbiting forward chase camera aligning with the ocean drop target
@@ -545,8 +562,8 @@ namespace PacificRimCutscene
 
                 fallTimer += Time.deltaTime;
 
-                // Cinematic tracking shot following Gipsy's drop
-                if (mainCamera != null)
+                // Cinematic tracking shot following Gipsy's drop (if freecam not active)
+                if (mainCamera != null && (PacificRimWater.JaegerCameraFollow.Instance == null || !PacificRimWater.JaegerCameraFollow.Instance.isCutsceneFreeCam))
                 {
                     Vector3 camPos = new Vector3(jaegerTransform.position.x + 18f, Mathf.Max(seaLevel + 10f, jaegerTransform.position.y + 4f), jaegerTransform.position.z - 32f);
                     mainCamera.transform.position = Vector3.Lerp(mainCamera.transform.position, camPos, Time.deltaTime * 7f);
@@ -617,6 +634,7 @@ namespace PacificRimCutscene
             Vector3 impactPoint = targetLandingPosition + Vector3.down * 1.5f;
 
             // 1. Colossal ocean impact splash: massive radial geyser droplets, mist, foam, and displacement waves
+            PacificRimWater.WaterSystem.Instance?.AddFootstepWave(impactPoint, 36f, 3.2f);
             PacificRimWater.WaterSplashManager.Instance?.SpawnColossalTitanDropSplash(impactPoint);
             PacificRimWater.WaterSplashManager.Instance?.SpawnBodySplash(impactPoint, Vector3.up, 3.8f, 3.5f);
             PacificRimWater.WaterSplashManager.Instance?.SpawnFootstepSplash(impactPoint, 3.5f);
@@ -642,10 +660,14 @@ namespace PacificRimCutscene
 
         private IEnumerator ExitCutsceneAndBootHUD()
         {
-            // 1. Restore normal third-person combat camera
+            // 1. Cut freecam and slowly move camera back to its over-the-shoulder natural position
             if (cameraFollowScript != null)
             {
                 cameraFollowScript.enabled = true;
+            }
+            if (PacificRimWater.JaegerCameraFollow.Instance != null)
+            {
+                PacificRimWater.JaegerCameraFollow.Instance.SmoothTransitionToOverTheShoulder(1.8f);
             }
 
             // 2. Slide letterbox bars offscreen
@@ -780,10 +802,14 @@ namespace PacificRimCutscene
                 PacificRimUI.JaegerHUD.Instance.SetCutsceneHidden(false);
             }
 
-            // Restore combat camera
+            // Restore combat camera instantly
             if (cameraFollowScript != null)
             {
                 cameraFollowScript.enabled = true;
+            }
+            if (PacificRimWater.JaegerCameraFollow.Instance != null)
+            {
+                PacificRimWater.JaegerCameraFollow.Instance.SmoothTransitionToOverTheShoulder(0.2f);
             }
 
             isCutsceneRunning = false;
@@ -798,7 +824,7 @@ namespace PacificRimCutscene
             chinookAudioSource = go.AddComponent<AudioSource>();
             chinookAudioSource.spatialBlend = 0.35f;
             chinookAudioSource.loop = true;
-            chinookAudioSource.volume = 1.0f;
+            chinookAudioSource.volume = 0.15f; // reduced volume for pleasant atmospheric convoy flight
             chinookAudioSource.rolloffMode = AudioRolloffMode.Logarithmic;
             chinookAudioSource.minDistance = 30f;
             chinookAudioSource.maxDistance = 250f;

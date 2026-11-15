@@ -20,15 +20,15 @@ namespace PacificRimWater
 
         [Header("Footstep Shockwave Settings")]
         [Tooltip("Radius of the tidal shockwave expanding from each footstep (meters).")]
-        public float footstepWaveRadius = 8.0f;
+        public float footstepWaveRadius = 18.0f;
         [Tooltip("Wave height impulse of each footstep.")]
-        public float footstepWaveStrength = 0.18f;
+        public float footstepWaveStrength = 2.4f;
         [Tooltip("Fallback distance in meters between consecutive footsteps if foot bones are missing.")]
         public float strideDistance = 6.0f;
         [Tooltip("Lateral spacing between left and right foot (meters).")]
         public float footSpacing = 2.4f;
         [Tooltip("Physical width of the wading leg for bow wave calculations.")]
-        public float legWidth = 2.4f;
+        public float legWidth = 2.8f;
 
         [Header("Continuous Wake Bubbles & Foam")]
         [Tooltip("Distance in meters moved before spawning another cross-section of churning wake bubbles & foam.")]
@@ -262,12 +262,13 @@ namespace PacificRimWater
                     }
                 }
 
-                // Dual leg bow wakes plowing through the ocean surface
-                if (horizontalSpeed > 1.0f && Time.time >= nextWakeTime)
+                // Dual leg bow wakes and dynamic ripples plowing through the ocean surface
+                if (horizontalSpeed > 0.8f && Time.time >= nextWakeTime)
                 {
-                    nextWakeTime = Time.time + 0.18f;
-                    water.AddWadingWake(LeftLegSurfacePoint, vel, legWidth, 0.08f);
-                    water.AddWadingWake(RightLegSurfacePoint, vel, legWidth, 0.08f);
+                    nextWakeTime = Time.time + 0.14f;
+                    float wakeAmp = Mathf.Clamp(horizontalSpeed * 0.18f, 0.75f, 1.8f);
+                    water.AddWadingWake(LeftLegSurfacePoint, vel, legWidth, wakeAmp);
+                    water.AddWadingWake(RightLegSurfacePoint, vel, legWidth, wakeAmp);
                 }
 
                 // Continuous churning bubble & foam wake trail streaming behind wading legs
@@ -551,7 +552,10 @@ namespace PacificRimWater
         {
             if (water != null)
             {
-                water.AddFootstepWave(contactPoint, radius, strength);
+                bool isHeavyLunge = controller != null && controller.IsSprintAttacking;
+                float finalRadius = isHeavyLunge ? Mathf.Max(radius, 26f) : radius;
+                float finalStrength = isHeavyLunge ? Mathf.Max(strength, 2.8f) : strength;
+                water.AddFootstepWave(contactPoint, finalRadius, finalStrength);
             }
 
             if (spawnSplashes)

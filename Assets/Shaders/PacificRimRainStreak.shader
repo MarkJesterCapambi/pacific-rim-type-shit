@@ -2,8 +2,10 @@ Shader "PacificRim/RainStreak"
 {
     Properties
     {
-        _TintColor("Streak Tint", Color) = (0.72, 0.82, 0.94, 0.18)
+        _TintColor("Streak Tint", Color) = (0.85, 0.92, 1.0, 0.48)
         _InvFade("Soft Particle Fade", Range(0.05, 3.0)) = 0.65
+        _NeedleCoreIntensity("Needle Core Intensity", Range(1.0, 5.0)) = 2.4
+        _NeedleSharpness("Needle Sharpness (Thinness)", Range(2.0, 8.0)) = 5.2
     }
 
     SubShader
@@ -55,6 +57,8 @@ Shader "PacificRim/RainStreak"
             CBUFFER_START(UnityPerMaterial)
                 half4 _TintColor;
                 float _InvFade;
+                float _NeedleCoreIntensity;
+                float _NeedleSharpness;
             CBUFFER_END
 
             float _GlobalLightningFlash;
@@ -96,9 +100,15 @@ Shader "PacificRim/RainStreak"
                 // Smooth lateral needle falloff & longitudinal streak taper
                 float lat = saturate(1.0 - abs(input.uv.x * 2.0 - 1.0));
                 float lon = saturate(sin(saturate(input.uv.y) * 3.14159265));
-                float mask = pow(lat, 3.2) * pow(lon, 0.85);
 
-                half3 flashBoost = _TintColor.rgb * (half)(1.0 + _GlobalLightningFlash * 0.65);
+                // High-contrast razor-thin specular core (sharp thin needle, never chunky)
+                float needleCore = pow(lat, max(2.0, _NeedleSharpness)); // Razor-thin intense glint line down center
+                float needleHalo = pow(lat, 2.0) * 0.30;                 // Soft translucent boundary
+                float mask = (needleCore * max(1.0, _NeedleCoreIntensity) + needleHalo) * pow(lon, 0.65);
+
+                // Highly visible, crisp raindrop refraction glint
+                half3 needleGlint = lerp(_TintColor.rgb, half3(0.96h, 0.98h, 1.0h), (half)(needleCore * 0.95));
+                half3 flashBoost = needleGlint * (half)(1.0 + _GlobalLightningFlash * 1.15);
                 half3 rgb = flashBoost * input.color.rgb;
                 rgb = MixFog(rgb, input.fogCoord);
 

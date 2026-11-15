@@ -42,6 +42,9 @@ Shader "PacificRim/OceanWater"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
+            #pragma multi_compile_fragment _ _ADDITIONAL_LIGHT_SHADOWS
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -93,10 +96,13 @@ Shader "PacificRim/OceanWater"
             float4 _OceanSwell3;
             float4 _OceanSwell3Dir;
             float4 _OceanHeightLimits;
-            float4 _OceanWakePositions[8];
-            float4 _OceanWakeParams[8];
+            float4 _OceanWakePositions[16];
+            float4 _OceanWakeParams[16];
             float4 _JaegerLeftLegWS;
             float4 _JaegerRightLegWS;
+            float4 _JaegerVelocityWS;
+            float4 _KaijuPositionWS;
+            float4 _KaijuVelocityWS;
             float4 _GlobalWindVector;
             float  _GlobalRainWetness;
             float  _GlobalLightningFlash;
@@ -163,7 +169,7 @@ Shader "PacificRim/OceanWater"
                 wakeEnergy = 0.0;
 
                 [unroll]
-                for (int i = 0; i < 8; i++)
+                for (int i = 0; i < 16; i++)
                 {
                     float4 posTime = _OceanWakePositions[i];
                     float4 p = _OceanWakeParams[i];
@@ -173,26 +179,27 @@ Shader "PacificRim/OceanWater"
                     if (age > 0.0 && normAge < 1.0 && abs(p.y) > 0.0001)
                     {
                         float timeDecay = (1.0 - normAge);
-                        timeDecay *= timeDecay;
+                        float timeDecaySq = timeDecay * timeDecay;
 
                         float2 dXZ = worldXZ - posTime.xz;
                         float distSq = dot(dXZ, dXZ);
                         float dist = sqrt(max(distSq, 0.0001));
 
-                        float radius = max(p.x, 1.5);
+                        float radius = max(p.x, 2.0);
                         float waveFront = age * p.z;
-                        float ringWidth = max(radius * 0.45, 1.5);
+                        float ringWidth = max(radius * 0.45, 2.2);
                         float u = (dist - waveFront) / ringWidth;
 
-                        float gauss = exp(-u * u) * exp(-dist / max(radius * 2.2, 2.0));
-                        float cosTerm = cos(u * 2.4);
-                        float ampTime = p.y * timeDecay;
+                        // Multi-harmonic propagating ripple packet with realistic spatial attenuation
+                        float gauss = exp(-u * u) * exp(-dist / max(radius * 3.0, 8.0));
+                        float cosTerm = cos(u * 3.4);
+                        float ampTime = p.y * timeDecaySq;
 
                         sum += cosTerm * gauss * ampTime;
                         wakeEnergy += gauss * timeDecay * abs(p.y);
 
-                        // Approximate radial slope derivative for crisp lighting on wakes
-                        float dCosDu = (-2.4 * sin(u * 2.4) - 2.0 * u * cosTerm) * gauss / ringWidth;
+                        // Exact radial slope derivative for dynamic specular and normal glints on ripple crests
+                        float dCosDu = (-3.4 * sin(u * 3.4) - 2.0 * u * cosTerm) * (gauss / ringWidth);
                         float2 dir = dXZ / dist;
                         float slopeMag = dCosDu * ampTime;
                         slopeX += dir.x * slopeMag;
@@ -302,13 +309,98 @@ Shader "PacificRim/OceanWater"
                     binormalZ.y *= 1.30;
                 }
 
-                // Propagating wakes
+                // Propagating wakes & ripples from movement, footsteps and impacts
                 float wSlopeX, wSlopeZ, wakeEnergy;
                 float wakeH = globalsActive ? EvaluateWakes(worldBase.xz, t, wSlopeX, wSlopeZ, wakeEnergy) : 0.0;
                 float cappedWake = clamp(tanh(wakeH / maxRipple) * maxRipple, -maxRipple, maxRipple);
                 disp.y += cappedWake;
-                tangentX.y += wSlopeX * 0.6;
-                binormalZ.y += wSlopeZ * 0.6;
+                tangentX.y += wSlopeX * 0.75;
+                binormalZ.y += wSlopeZ * 0.75;
+
+                // Dynamic Real-time Mesh Deformation: Localized cavitation and surging bow waves under moving colossal limbs
+                // 1. Jaeger Left Leg
+                if (_JaegerLeftLegWS.w > 0.01)
+                {
+                    float2 dLeft = worldBase.xz - _JaegerLeftLegWS.xz;
+                    float distL = length(dLeft);
+                    float rL = max(_JaegerLeftLegWS.w, 2.2);
+                    if (distL < rL * 3.4)
+                    {
+                        float uL = distL / rL;
+                        float cavL = -exp(-uL * uL * 1.5) * 1.35;
+
+                        float vSpdL = _JaegerVelocityWS.w;
+                        float2 vDirL = normalize(_JaegerVelocityWS.xz + float2(0.0001, 0.0001));
+                        float fwdDotL = dot(normalize(dLeft + float2(0.0001, 0.0001)), vDirL);
+                        float bowL = 0.0;
+                        if (vSpdL > 0.5 && fwdDotL > 0.12)
+                        {
+                            float bowDistL = length(worldBase.xz - (_JaegerLeftLegWS.xz + vDirL * rL * 1.0));
+                            float bowUL = bowDistL / (rL * 1.5);
+                            bowL = exp(-bowUL * bowUL * 1.9) * saturate(fwdDotL * 1.5) * min(vSpdL * 0.24, 1.85);
+                        }
+                        disp.y += (cavL + bowL);
+                        float2 nrmDirL = dLeft / (distL + 0.01);
+                        tangentX.y += nrmDirL.x * (cavL * -1.6 + bowL * 1.4);
+                        binormalZ.y += nrmDirL.y * (cavL * -1.6 + bowL * 1.4);
+                    }
+                }
+
+                // 2. Jaeger Right Leg
+                if (_JaegerRightLegWS.w > 0.01)
+                {
+                    float2 dRight = worldBase.xz - _JaegerRightLegWS.xz;
+                    float distR = length(dRight);
+                    float rR = max(_JaegerRightLegWS.w, 2.2);
+                    if (distR < rR * 3.4)
+                    {
+                        float uR = distR / rR;
+                        float cavR = -exp(-uR * uR * 1.5) * 1.35;
+
+                        float vSpdR = _JaegerVelocityWS.w;
+                        float2 vDirR = normalize(_JaegerVelocityWS.xz + float2(0.0001, 0.0001));
+                        float fwdDotR = dot(normalize(dRight + float2(0.0001, 0.0001)), vDirR);
+                        float bowR = 0.0;
+                        if (vSpdR > 0.5 && fwdDotR > 0.12)
+                        {
+                            float bowDistR = length(worldBase.xz - (_JaegerRightLegWS.xz + vDirR * rR * 1.0));
+                            float bowUR = bowDistR / (rR * 1.5);
+                            bowR = exp(-bowUR * bowUR * 1.9) * saturate(fwdDotR * 1.5) * min(vSpdR * 0.24, 1.85);
+                        }
+                        disp.y += (cavR + bowR);
+                        float2 nrmDirR = dRight / (distR + 0.01);
+                        tangentX.y += nrmDirR.x * (cavR * -1.6 + bowR * 1.4);
+                        binormalZ.y += nrmDirR.y * (cavR * -1.6 + bowR * 1.4);
+                    }
+                }
+
+                // 3. Kaiju Body / Mass Water Displacement
+                if (_KaijuPositionWS.w > 0.01)
+                {
+                    float2 dKaiju = worldBase.xz - _KaijuPositionWS.xz;
+                    float distK = length(dKaiju);
+                    float rK = max(_KaijuPositionWS.w, 4.0);
+                    if (distK < rK * 3.2)
+                    {
+                        float uK = distK / rK;
+                        float cavK = -exp(-uK * uK * 1.2) * 1.6;
+
+                        float vSpdK = _KaijuVelocityWS.w;
+                        float2 vDirK = normalize(_KaijuVelocityWS.xz + float2(0.0001, 0.0001));
+                        float fwdDotK = dot(normalize(dKaiju + float2(0.0001, 0.0001)), vDirK);
+                        float bowK = 0.0;
+                        if (vSpdK > 0.5 && fwdDotK > 0.12)
+                        {
+                            float bowDistK = length(worldBase.xz - (_KaijuPositionWS.xz + vDirK * rK * 1.0));
+                            float bowUK = bowDistK / (rK * 1.6);
+                            bowK = exp(-bowUK * bowUK * 1.7) * saturate(fwdDotK * 1.4) * min(vSpdK * 0.28, 2.3);
+                        }
+                        disp.y += (cavK + bowK);
+                        float2 nrmDirK = dKaiju / (distK + 0.01);
+                        tangentX.y += nrmDirK.x * (cavK * -1.5 + bowK * 1.3);
+                        binormalZ.y += nrmDirK.y * (cavK * -1.5 + bowK * 1.3);
+                    }
+                }
 
                 // Asymmetric soft-limit: deep ceiling for rare rogue crests (+maxTotal), knee-level floor for troughs (-maxTrough)
                 float activeLimit = disp.y >= 0.0 ? maxTotal : maxTrough;
@@ -442,8 +534,52 @@ Shader "PacificRim/OceanWater"
                 float crestFactor = saturate(input.waveElevation * 0.30);
                 half3 sss = _SubsurfaceColor.rgb * mainLight.color * (backLight * crestFactor * 0.9 + crestFactor * 0.25);
 
-                half3 diffuseLitVolume = waterVolume * (mainLight.color * saturate(dot(normalWS, lightDir) * 0.55 + 0.45)) + sss;
-                half3 refractedTotal = lerp(diffuseLitVolume, underwaterCol * lerp(half3(1.0, 1.0, 1.0), _ShallowColor.rgb * 1.5, depthMix * 0.65), transmittance);
+                // Additional Spotlights / Searchlights (Chinook patrols, Jaeger visor & chest lights)
+                float specPower = exp2(9.5 * _Smoothness + 1.0);
+                half3 addDiffuseLit = half3(0.0, 0.0, 0.0);
+                half3 addGlint = half3(0.0, 0.0, 0.0);
+                half3 addUnderwaterLit = half3(0.0, 0.0, 0.0);
+                half3 addFoamLit = half3(0.0, 0.0, 0.0);
+
+                InputData inputData = (InputData)0;
+                inputData.positionWS = input.positionWS;
+                inputData.normalizedScreenSpaceUV = screenUV;
+
+                #if defined(_ADDITIONAL_LIGHTS) || defined(_CLUSTER_LIGHT_LOOP) || defined(_FORWARD_PLUS)
+                uint addLightsCount = GetAdditionalLightsCount();
+                LIGHT_LOOP_BEGIN(addLightsCount)
+                    Light addLight = GetAdditionalLight(lightIndex, input.positionWS);
+                    half3 addLightColor = addLight.color * (addLight.distanceAttenuation * addLight.shadowAttenuation);
+
+                    if (dot(addLightColor, addLightColor) > 0.00001)
+                    {
+                        float3 addLightDir = normalize(addLight.direction);
+                        float addNdotL = saturate(dot(normalWS, addLightDir));
+                        float addBackLight = pow(saturate(dot(viewDirWS, -addLightDir + normalWS * 0.45)), 3.0);
+
+                        // 1. Water volume subsurface scattering & diffuse body (water visibly lights up)
+                        half3 addSSS = _SubsurfaceColor.rgb * addLightColor * (addBackLight * crestFactor * 1.6 + crestFactor * 0.45);
+                        addDiffuseLit += waterVolume * (addLightColor * (addNdotL * 0.75 + 0.25)) + addSSS;
+
+                        // 2. Light penetrates into ocean column, illuminating the underwater depth and seabed underneath
+                        addUnderwaterLit += underwaterCol * addLightColor * (2.2 * transmittance + 0.5 * depthMix);
+
+                        // 3. Specular glitter & broad glancing sheen across wave ripples
+                        float3 addHalfDir = normalize(addLightDir + viewDirWS);
+                        float addNdotH = saturate(dot(normalWS, addHalfDir));
+                        float addSpec = pow(addNdotH, specPower) * 2.2;
+                        float addBroad = pow(addNdotH, max(1.0, specPower * 0.12)) * 0.5;
+                        addGlint += min(half3(2.5, 2.5, 2.5), (addSpec + addBroad) * _SpecularColor.rgb * addLightColor);
+
+                        // 4. Whitecaps, seafoam, and wakes lit by the spotlight
+                        addFoamLit += _FoamColor.rgb * addLightColor * (addNdotL * 0.6 + 0.4);
+                    }
+                LIGHT_LOOP_END
+                #endif
+
+                half3 diffuseLitVolume = waterVolume * (mainLight.color * saturate(dot(normalWS, lightDir) * 0.55 + 0.45)) + sss + addDiffuseLit;
+                half3 underwaterRefracted = underwaterCol * lerp(half3(1.0, 1.0, 1.0), _ShallowColor.rgb * 1.5, depthMix * 0.65) + addUnderwaterLit;
+                half3 refractedTotal = lerp(diffuseLitVolume, underwaterRefracted, transmittance);
 
                 // Schlick Fresnel (water F0 = 0.02) & Skybox Cubemap Environment Reflection
                 float fresnel = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
@@ -455,11 +591,10 @@ Shader "PacificRim/OceanWater"
                 // GGX-style sun specular glitter across capillary ripples
                 float3 halfDir = normalize(lightDir + viewDirWS);
                 float NdotH = saturate(dot(normalWS, halfDir));
-                float specPower = exp2(9.5 * _Smoothness + 1.0);
                 float spec = pow(NdotH, specPower) * 1.85;
                 half3 sunGlint = min(half3(1.35, 1.35, 1.35), spec * _SpecularColor.rgb * mainLight.color * mainLight.shadowAttenuation);
 
-                half3 surfaceColor = lerp(refractedTotal, skyReflection, saturate(fresnel * 0.92)) + sunGlint;
+                half3 surfaceColor = lerp(refractedTotal, skyReflection, saturate(fresnel * 0.92)) + sunGlint + addGlint;
 
                 // Subtle, physically-thin meniscus right at leg/geometry intersection only
                 float intersectionDist = min(waterDepth, refractedThickness);
@@ -501,7 +636,7 @@ Shader "PacificRim/OceanWater"
                 // Effervescent cellular bubble foam on water surface along Jaeger's wake path
                 float wakeFoam = saturate(input.wakeFactor * (bubbles * 0.65 + fineFizz * 0.45 + 0.20));
 
-                half3 foamLit = _FoamColor.rgb * saturate(dot(normalWS, lightDir) * 0.35 + 0.65);
+                half3 foamLit = _FoamColor.rgb * saturate(dot(normalWS, lightDir) * 0.35 + 0.65) + addFoamLit;
                 foamLit += _FoamColor.rgb * bubbleRim * bigCrest * 0.22;
                 finalRgb = lerp(finalRgb, foamLit, saturate(crestFoam + wakeFoam * 0.85));
                 subtleFoam = saturate(subtleFoam + crestFoam + wakeFoam);

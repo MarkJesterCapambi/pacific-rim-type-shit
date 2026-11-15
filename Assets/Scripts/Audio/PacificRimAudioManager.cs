@@ -238,9 +238,9 @@ namespace PacificRimAudio
             uiAudioSource.spatialBlend = 0f;
             uiAudioSource.ignoreListenerPause = true;
 
-            // Dedicated Loops (Storm ambience lowered by 0.5x to 0.20f)
-            stormAmbienceSource = CreateLoopSource("StormAmbienceLoop", 0.20f);
-            jaegerTurbineSource = CreateLoopSource("JaegerTurbineLoop", 0.28f);
+            // Dedicated Loops (Lowered background rainfall/storm ambience by 75% to 0.05f)
+            stormAmbienceSource = CreateLoopSource("StormAmbienceLoop", 0.05f);
+            jaegerTurbineSource = CreateLoopSource("JaegerTurbineLoop", 0.10f);
             jaegerRocketBurnSource = CreateLoopSource("JaegerRocketBurnLoop", 0.85f);
             kaijuEmpSparksSource = CreateLoopSource("KaijuEmpSparksLoop", 0.65f);
 

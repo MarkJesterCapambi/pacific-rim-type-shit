@@ -203,10 +203,30 @@ namespace PacificRimUI.Editor
                 "GIPSY DANGER // MARK-III", PacificRimUITheme.TextDim, TextAnchor.MiddleLeft, 13, 2, true);
             Stretch(chassisTxt.rectTransform);
 
-            var topRight = CreateRect("TopRight_Sync", root.transform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-44f, -34f), new Vector2(420f, 34f));
+            var topRight = CreateRect("TopRight_Sync", root.transform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-44f, -24f), new Vector2(460f, 58f));
             SetPivot(topRight, 1f, 1f);
-            var linkTxt = CreateStyledText("LinkStatus", topRight.transform, PacificRimTextStyle.Caption,
-                "DRIFT HANDSHAKE // SYNCHRONIZED", PacificRimUITheme.Success, TextAnchor.MiddleRight, 13, 2, true);
+
+            var timerRow = CreateRect("TopRight_TimerRow", topRight.transform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, 0f), new Vector2(0f, 26f));
+            SetPivot(timerRow, 1f, 1f);
+
+            var timerTxt = CreateStyledText("CombatTimerText", timerRow.transform, PacificRimTextStyle.Number,
+                "TIME: 00:00", PacificRimUITheme.BlueBright, TextAnchor.MiddleRight, 16, 1, false);
+            timerTxt.rectTransform.anchorMin = new Vector2(0.52f, 0f);
+            timerTxt.rectTransform.anchorMax = new Vector2(1f, 1f);
+            timerTxt.rectTransform.offsetMin = Vector2.zero;
+            timerTxt.rectTransform.offsetMax = Vector2.zero;
+
+            var bestTxt = CreateStyledText("BestTimeText", timerRow.transform, PacificRimTextStyle.Caption,
+                $"BEST: {PacificRimCombatRecords.FormatTime(PacificRimCombatRecords.GetBestTime())}", PacificRimUITheme.Amber, TextAnchor.MiddleRight, 13, 2, true);
+            bestTxt.rectTransform.anchorMin = new Vector2(0f, 0f);
+            bestTxt.rectTransform.anchorMax = new Vector2(0.52f, 1f);
+            bestTxt.rectTransform.offsetMin = Vector2.zero;
+            bestTxt.rectTransform.offsetMax = new Vector2(-8f, 0f);
+
+            var linkRow = CreateRect("TopRight_LinkRow", topRight.transform, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 0f), new Vector2(0f, 24f));
+            SetPivot(linkRow, 1f, 0f);
+            var linkTxt = CreateStyledText("LinkStatus", linkRow.transform, PacificRimTextStyle.Caption,
+                "DRIFT HANDSHAKE // SYNCHRONIZED", PacificRimUITheme.Success, TextAnchor.MiddleRight, 12, 2, true);
             Stretch(linkTxt.rectTransform);
 
             // 4. Top-Center Kaiju Boss Health Bar Panel
@@ -370,6 +390,9 @@ namespace PacificRimUI.Editor
             // Wire serialized fields into JaegerHUD
             SetSerializedField(hud, "chassisLabelText", chassisTxt);
             SetSerializedField(hud, "linkStatusText", linkTxt);
+            SetSerializedField(hud, "combatTimerText", timerTxt);
+            SetSerializedField(hud, "bestTimeText", bestTxt);
+            SetSerializedField(hud, "timerContainer", timerRow);
             SetSerializedField(hud, "hullCaptionText", hullCaptionTxt);
             SetSerializedField(hud, "hullNumberText", hullNumTxt);
             SetSerializedField(hud, "hullBar", hullBar);
@@ -435,7 +458,7 @@ namespace PacificRimUI.Editor
             SetAnchorTop(titleTxt.rectTransform, 0f, -22f, 520f, 28f);
 
             var subTxt = CreateStyledText("Pause_Subtitle", dialogGo.transform, PacificRimTextStyle.Caption,
-                "PAN PACIFIC DEFENSE CORPS // TACTICAL ARCHIVE", PacificRimUITheme.TextDim, TextAnchor.MiddleCenter, 11, 2, true);
+                "MISSION DIRECTIVE // DEFEND STRIKER EUREKA", PacificRimUITheme.TextDim, TextAnchor.MiddleCenter, 11, 2, true);
             SetAnchorTop(subTxt.rectTransform, 0f, -50f, 520f, 20f);
 
             CreateDivider("Pause_Divider", dialogGo.transform, -74f, 480f);
@@ -454,7 +477,7 @@ namespace PacificRimUI.Editor
             SetAnchorTopLeft(healthTxt.rectTransform, 16f, -36f, 440f, 20f);
 
             var stanceTxt = CreateStyledText("StanceInfo", telemBox.transform, PacificRimTextStyle.Caption,
-                "COMBAT SYSTEMS: STANDBY // MELEE READY", PacificRimUITheme.TextDim, TextAnchor.MiddleLeft, 11, 2, true);
+                "MISSION: SAVE STRIKER EUREKA // INTERCEPT LEATHERBACK", PacificRimUITheme.TextDim, TextAnchor.MiddleLeft, 11, 2, true);
             SetAnchorTopLeft(stanceTxt.rectTransform, 16f, -60f, 440f, 20f);
 
             // Action Buttons Group (Clean vertical stack)
@@ -537,8 +560,9 @@ namespace PacificRimUI.Editor
             var tabBar = BuildTabBar(topBar.transform, out var tabButtons);
 
             // Right sector status caption on top bar
+            string initBest = PacificRimCombatRecords.FormatTime(PacificRimCombatRecords.GetBestTime());
             var sectorCaption = CreateStyledText("SectorStatus", topBar.transform, PacificRimTextStyle.Caption,
-                "SHATTERDOME // HONG KONG SECTOR 07", PacificRimUITheme.BlueBright, TextAnchor.MiddleRight, 13, 2, true);
+                $"SHATTERDOME // SECTOR 07  [BEST TIME: {initBest}]", PacificRimUITheme.BlueBright, TextAnchor.MiddleRight, 13, 2, true);
             sectorCaption.rectTransform.anchorMin = new Vector2(0.55f, 0f);
             sectorCaption.rectTransform.anchorMax = new Vector2(1f, 1f);
             sectorCaption.rectTransform.offsetMin = Vector2.zero;
@@ -555,9 +579,9 @@ namespace PacificRimUI.Editor
             // Section Title ("PPDC COMMAND INTERFACE") with 20x2 blue bar + hairline
             var sectionHeader = BuildSectionTitle("SectionHeader", leftCol.transform, -20f, "PAN PACIFIC DEFENSE CORPS // THEATER PROTOCOL");
 
-            // Display Title ("PACIFIC RIM")
+            // Display Title ("PACIFIC RIM: OPERATION PITFALL")
             var pageTitle = CreateStyledText("PageTitle", leftCol.transform, PacificRimTextStyle.Display,
-                "PACIFIC RIM", PacificRimUITheme.Text, TextAnchor.UpperLeft, 54, 2, true);
+                "PACIFIC RIM: OPERATION PITFALL", PacificRimUITheme.Text, TextAnchor.UpperLeft, 40, 2, true);
             var ptRt = pageTitle.rectTransform;
             ptRt.anchorMin = new Vector2(0f, 1f);
             ptRt.anchorMax = new Vector2(1f, 1f);
@@ -566,7 +590,7 @@ namespace PacificRimUI.Editor
             ptRt.sizeDelta = new Vector2(0f, 68f);
 
             var subTitle = CreateStyledText("SubTitle", leftCol.transform, PacificRimTextStyle.Caption,
-                "OPERATION PITFALL // MARK-III NUCLEAR VORTEX TURBINE", PacificRimUITheme.Amber, TextAnchor.MiddleLeft, 14, 2, true);
+                "PPDC TACTICAL COMMAND // MISSION: DEFEND STRIKER EUREKA", PacificRimUITheme.Amber, TextAnchor.MiddleLeft, 14, 2, true);
             var stRt = subTitle.rectTransform;
             stRt.anchorMin = new Vector2(0f, 1f);
             stRt.anchorMax = new Vector2(1f, 1f);
@@ -628,7 +652,7 @@ namespace PacificRimUI.Editor
             vLayout.childForceExpandHeight = false;
 
             var cardDeploy = CreateFeatureCard("Card_Deploy", cardsContainer.transform, 0f, 0f, 114f,
-                "01 // INTERCEPT", "OPERATION PITFALL", "Typhoon Harbor Patrol // Storm Watch", "READY", PacificRimUITheme.Success);
+                "01 // OPERATION PITFALL", "SAVE STRIKER EUREKA", "Defend paralyzed Striker Eureka against Leatherback", "READY", PacificRimUITheme.Success);
             var le1 = cardDeploy.GetComponent<LayoutElement>() ?? cardDeploy.gameObject.AddComponent<LayoutElement>();
             le1.preferredHeight = 114f;
             cardDeploy.SetSelected(true);
@@ -683,6 +707,7 @@ namespace PacificRimUI.Editor
             SetSerializedField(mainMenu, "controlsModal", controlsModal);
             SetSerializedField(mainMenu, "specsModal", specsModal);
             SetSerializedField(mainMenu, "jaegerHud", hud);
+            SetSerializedField(mainMenu, "menuBestTimeText", sectorCaption);
 
             return menuRoot;
         }
@@ -830,21 +855,21 @@ namespace PacificRimUI.Editor
             var page = CreateRect("Page_Operation", parent, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
 
             var desc = CreateStyledText("BriefingText", page.transform, PacificRimTextStyle.Body,
-                "Category-class storm conditions detected across Hong Kong Bay. Dual-pilot neural handshake stabilized. " +
-                "Strike with LMB/RMB for light and heavy melee combos, raise Defense Matrix [F] to absorb heavy impacts, or cycle Turbine Overcharge [Q].",
-                PacificRimUITheme.TextDim, TextAnchor.UpperLeft, 17, 0, false);
+                "CRITICAL MISSION DIRECTIVE: Category IV Kaiju 'LEATHERBACK' has ambushed Hong Kong Bay and detonated an organic EMP wave, causing total electrical and neural shutdown to Striker Eureka. With Striker paralyzed and defenseless, Gipsy Danger is deployed via heavy tactical airdrop to draw Leatherback's aggression, intercept the Kaiju, and save Striker Eureka from imminent destruction.",
+                PacificRimUITheme.TextDim, TextAnchor.UpperLeft, 14, 0, false);
             desc.horizontalOverflow = HorizontalWrapMode.Wrap;
             desc.verticalOverflow = VerticalWrapMode.Truncate;
-            desc.lineSpacing = 1.25f;
+            desc.lineSpacing = 1.2f;
             var dRt = desc.rectTransform;
             dRt.anchorMin = new Vector2(0f, 1f);
             dRt.anchorMax = new Vector2(1f, 1f);
             dRt.pivot = new Vector2(0f, 1f);
             dRt.anchoredPosition = new Vector2(0f, -8f);
-            dRt.sizeDelta = new Vector2(0f, 108f);
+            dRt.sizeDelta = new Vector2(0f, 112f);
 
-            BuildUIListRow("OpRow_Weather", page.transform, -126f, "THEATER CONDITION", "TYPHOON FORCE // LIGHTNING WATCH", true);
-            BuildUIListRow("OpRow_Chassis", page.transform, -186f, "DEPLOYED JAEGER", "GIPSY DANGER [MARK-III]", false);
+            BuildUIListRow("OpRow_Weather", page.transform, -126f, "PRIMARY DIRECTIVE", "SAVE STRIKER EUREKA // INTERCEPT LEATHERBACK", true);
+            BuildUIListRow("OpRow_Chassis", page.transform, -186f, "ALLIED STATUS", "STRIKER EUREKA: DISABLED BY EMP // UNDER ATTACK", false);
+            BuildUIListRow("OpRow_BestRecord", page.transform, -246f, "SPEEDRUN RECORD // BEST TIME", PacificRimCombatRecords.FormatTime(PacificRimCombatRecords.GetBestTime()), true);
 
             return page;
         }

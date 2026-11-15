@@ -69,6 +69,8 @@ Shader "PacificRim/VolumetricLightBeam"
                 float _WaterLevel;
             CBUFFER_END
 
+            float _GlobalLightningFlash;
+
             Varyings vert(Attributes input)
             {
                 Varyings output;
@@ -138,9 +140,10 @@ Shader "PacificRim/VolumetricLightBeam"
                 depthFade = saturate((sceneEyeDepth - vertexEyeDepth) * 0.35);
                 #endif
 
-                // 6. Combine volumetric scattering
+                // 6. Combine volumetric scattering with lightning flash reactivity
                 float alpha = axialWeight * rimFade * mistMod * waterFade * depthFade * _Color.a;
-                float3 finalColor = _Color.rgb * (_Intensity * alpha);
+                float flashBoost = 1.0 + _GlobalLightningFlash * 1.6;
+                float3 finalColor = _Color.rgb * (_Intensity * alpha * flashBoost);
 
                 // Apply Unity distance fog
                 finalColor = MixFog(finalColor, input.fogCoord);

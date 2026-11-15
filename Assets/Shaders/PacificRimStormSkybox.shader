@@ -11,7 +11,9 @@ Shader "PacificRim/StormSkybox"
         _CloudCover("Cloud Coverage", Range(0.2, 0.95)) = 0.62
         _CloudSoftness("Cloud Edge Softness", Range(0.05, 0.6)) = 0.28
         _CloudDetailScale("Cloud Detail Scale", Range(0.5, 3.0)) = 1.35
-        _ScudSpeedMultiplier("Low Scud Wind Speed", Range(1.0, 4.0)) = 2.4
+        _CloudSpeed("Cloud Wind Speed", Range(0.5, 8.0)) = 3.2
+        _CloudChurnSpeed("Cloud Churn / Boil Speed", Range(0.0, 3.0)) = 1.1
+        _ScudSpeedMultiplier("Low Scud Wind Speed", Range(1.0, 6.0)) = 3.4
         _CloudNoiseTex("Cloud Noise", 2D) = "gray" {}
     }
 
@@ -63,6 +65,8 @@ Shader "PacificRim/StormSkybox"
                 float _CloudCover;
                 float _CloudSoftness;
                 float _CloudDetailScale;
+                float _CloudSpeed;
+                float _CloudChurnSpeed;
                 float _ScudSpeedMultiplier;
                 float4 _CloudNoiseTex_ST;
             CBUFFER_END
@@ -90,13 +94,20 @@ Shader "PacificRim/StormSkybox"
                 float t = _Time.y;
                 float2 windDir = normalize(_GlobalWindVector.xy + float2(0.85, 0.52));
                 float windSpeed = length(_GlobalWindVector.xy) > 0.1 ? length(_GlobalWindVector.xy) : 24.0;
-                float2 windPan = windDir * (t * windSpeed * 0.00075);
+                
+                // Active, cinematic storm cloud movement across the sky
+                float cloudSpeedFactor = max(0.2, _CloudSpeed);
+                float2 windPan = windDir * (t * windSpeed * 0.0032 * cloudSpeedFactor);
 
-                // --- Layer 1: Cumulonimbus Storm Deck with Domain Warping ---
+                // --- Layer 1: Cumulonimbus Storm Deck with Domain Warping & Rolling Churn ---
+                float churn = t * 0.18 * _CloudChurnSpeed;
+                float2 churnShift1 = float2(sin(churn * 0.9 + skyUV.y * 0.4), cos(churn * 0.7 + skyUV.x * 0.4)) * 0.045;
+                float2 churnShift2 = float2(cos(churn * 1.1 - skyUV.x * 0.5), sin(churn * 0.8 - skyUV.y * 0.5)) * 0.045;
+
                 float2 baseUV = skyUV * (0.16 * _CloudDetailScale);
-                float warp1 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, baseUV * 0.7 + windPan * 0.6).r;
-                float warp2 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, baseUV * 0.7 + float2(0.43, 0.27) - windPan * 0.4).r;
-                float2 warpedUV = baseUV + float2(warp1 - 0.5, warp2 - 0.5) * 0.55 + windPan;
+                float warp1 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, baseUV * 0.7 + windPan * 0.6 + churnShift1).r;
+                float warp2 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, baseUV * 0.7 + float2(0.43, 0.27) - windPan * 0.35 + churnShift2).r;
+                float2 warpedUV = baseUV + float2(warp1 - 0.5, warp2 - 0.5) * 0.62 + windPan;
 
                 float nMacro = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, warpedUV * 0.65).r;
                 float nMid   = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, warpedUV * 1.55 + float2(0.31, 0.19)).r;
@@ -125,12 +136,13 @@ Shader "PacificRim/StormSkybox"
                 half3 highlightTone = _CloudLightColor.rgb * (half)(1.0 + lightScatter * 0.65);
                 cloudTone = lerp(cloudTone, highlightTone, saturate(edgeRim * 0.85 + billowHighlight * 0.45));
 
-                // --- Layer 2: Fast-moving Low Scud Clouds (Ragged torn shreds) ---
-                float2 scudUV = skyUV * (0.32 * _CloudDetailScale) + windPan * _ScudSpeedMultiplier;
+                // --- Layer 2: Fast-moving Low Scud Clouds (Ragged torn shreds rushing beneath deck) ---
+                float2 scudPan = windDir * (t * windSpeed * 0.0032 * cloudSpeedFactor * _ScudSpeedMultiplier);
+                float2 scudUV = skyUV * (0.34 * _CloudDetailScale) + scudPan;
                 float scudN1 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, scudUV).r;
-                float scudN2 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, scudUV * 2.2 + float2(0.55, 0.21)).r;
+                float scudN2 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, scudUV * 2.2 + float2(0.55, 0.21) + windPan * 0.4).r;
                 float scudCombined = scudN1 * 0.65 + scudN2 * 0.35;
-                float scudDensity = smoothstep(0.54, 0.80, scudCombined) * smoothstep(0.04, 0.35, dir.y);
+                float scudDensity = smoothstep(0.52, 0.78, scudCombined) * smoothstep(0.04, 0.38, dir.y);
 
                 // --- Internal Lightning Volumetric Illumination ---
                 half3 lightningColor = half3(0.52h, 0.74h, 1.0h);

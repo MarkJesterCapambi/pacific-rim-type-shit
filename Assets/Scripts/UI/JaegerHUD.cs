@@ -18,6 +18,14 @@ namespace PacificRimUI
         [Header("Top Header Telemetry")]
         [SerializeField] private Text chassisLabelText;
         [SerializeField] private Text linkStatusText;
+        [SerializeField] private Text combatTimerText;
+        [SerializeField] private Text bestTimeText;
+        [SerializeField] private GameObject timerContainer;
+
+        public float CurrentCombatTime => combatElapsedTime;
+        private float combatElapsedTime = 0f;
+        private bool isCombatTimerRunning = false;
+        private bool isCombatFinished = false;
 
         [Header("Hull & Overcharge Panel (Bottom-Left)")]
         [SerializeField] private Text hullCaptionText;
@@ -415,6 +423,7 @@ namespace PacificRimUI
             UpdateStamina();
             UpdateCombatAndTelemetry();
             UpdateBossHealthBar();
+            UpdateCombatTimer();
             UpdateScreenImpact();
             UpdateBanner();
         }
@@ -494,6 +503,8 @@ namespace PacificRimUI
             if (jaeger.IsDead && !wasJaegerDead)
             {
                 PacificRimUISound.PlayDeny();
+                isCombatFinished = true;
+                isCombatTimerRunning = false;
                 ShowBanner("CRITICAL HULL BREACH // JAEGER DESTROYED", 4.0f);
             }
             wasJaegerDead = jaeger.IsDead;
@@ -718,7 +729,24 @@ namespace PacificRimUI
             if (kaiju.IsDead && !wasKaijuDead)
             {
                 PacificRimUISound.PlaySuccess();
-                ShowBanner("CATEGORY IV KAIJU NEUTRALIZED // VICTORY", 5.0f);
+                isCombatFinished = true;
+                isCombatTimerRunning = false;
+
+                bool isNewBest = false;
+                if (combatElapsedTime > 0.5f)
+                {
+                    PacificRimCombatRecords.TryRecordVictoryTime(combatElapsedTime, out isNewBest);
+                }
+
+                if (isNewBest)
+                {
+                    ShowBanner($"NEW BEST RECORD! // TIME: {PacificRimCombatRecords.FormatTime(combatElapsedTime)}", 6.0f);
+                    PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDCheatActivated();
+                }
+                else
+                {
+                    ShowBanner($"CATEGORY IV KAIJU NEUTRALIZED // TIME: {PacificRimCombatRecords.FormatTime(combatElapsedTime)}", 5.0f);
+                }
             }
             wasKaijuDead = kaiju.IsDead;
         }
@@ -863,6 +891,134 @@ namespace PacificRimUI
             }
 
             bannerGroup.alpha = bannerAlpha;
+        }
+
+        private void UpdateCombatTimer()
+        {
+            EnsureTimerUI();
+
+            bool isCutscene = isCutsceneMode;
+            if (PacificRimCutscene.PacificRimDeploymentCutscene.Instance != null &&
+                PacificRimCutscene.PacificRimDeploymentCutscene.Instance.isCutsceneRunning)
+            {
+                isCutscene = true;
+            }
+
+            if (!isCutscene && !isCombatFinished && !MainMenuUI.IsMenuOpen)
+            {
+                isCombatTimerRunning = true;
+                combatElapsedTime += Time.deltaTime;
+            }
+            else if (isCutscene)
+            {
+                isCombatTimerRunning = false;
+            }
+
+            if (combatTimerText != null)
+            {
+                combatTimerText.text = $"TIME: {PacificRimCombatRecords.FormatTime(combatElapsedTime)}";
+                combatTimerText.color = isCombatTimerRunning ? PacificRimUITheme.BlueBright : PacificRimUITheme.TextDim;
+            }
+
+            if (bestTimeText != null)
+            {
+                float best = PacificRimCombatRecords.GetBestTime();
+                bestTimeText.text = $"BEST: {PacificRimCombatRecords.FormatTime(best)}";
+                bestTimeText.color = PacificRimUITheme.Amber;
+            }
+        }
+
+        private void EnsureTimerUI()
+        {
+            if (combatTimerText != null && bestTimeText != null) return;
+
+            Transform topRight = transform.Find("TopRight_Sync");
+            if (topRight == null && linkStatusText != null)
+            {
+                topRight = linkStatusText.transform.parent;
+            }
+            if (topRight == null) return;
+
+            // Expand TopRight_Sync rect to accommodate timer row
+            RectTransform rt = topRight.GetComponent<RectTransform>();
+            if (rt != null && rt.sizeDelta.y < 50f)
+            {
+                rt.sizeDelta = new Vector2(Mathf.Max(420f, rt.sizeDelta.x), 58f);
+            }
+
+            Transform row = topRight.Find("TopRight_TimerRow");
+            if (row == null)
+            {
+                GameObject rowGo = new GameObject("TopRight_TimerRow", typeof(RectTransform));
+                rowGo.transform.SetParent(topRight, false);
+                row = rowGo.transform;
+
+                RectTransform rRt = rowGo.GetComponent<RectTransform>();
+                rRt.anchorMin = new Vector2(0f, 1f);
+                rRt.anchorMax = new Vector2(1f, 1f);
+                rRt.pivot = new Vector2(1f, 1f);
+                rRt.anchoredPosition = new Vector2(0f, 0f);
+                rRt.sizeDelta = new Vector2(0f, 26f);
+
+                // Best time text on left of row
+                GameObject bGo = new GameObject("BestTimeText", typeof(RectTransform), typeof(Text));
+                bGo.transform.SetParent(row, false);
+                bestTimeText = bGo.GetComponent<Text>();
+                bestTimeText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                bestTimeText.fontSize = 13;
+                bestTimeText.alignment = TextAnchor.MiddleRight;
+                bestTimeText.color = PacificRimUITheme.Amber;
+                bestTimeText.raycastTarget = false;
+                bestTimeText.text = $"BEST: {PacificRimCombatRecords.FormatTime(PacificRimCombatRecords.GetBestTime())}";
+                RectTransform bRt = bGo.GetComponent<RectTransform>();
+                bRt.anchorMin = new Vector2(0f, 0f);
+                bRt.anchorMax = new Vector2(0.52f, 1f);
+                bRt.offsetMin = Vector2.zero;
+                bRt.offsetMax = new Vector2(-8f, 0f);
+
+                // Combat timer on right of row
+                GameObject tGo = new GameObject("CombatTimerText", typeof(RectTransform), typeof(Text));
+                tGo.transform.SetParent(row, false);
+                combatTimerText = tGo.GetComponent<Text>();
+                combatTimerText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                combatTimerText.fontSize = 16;
+                combatTimerText.fontStyle = FontStyle.Bold;
+                combatTimerText.alignment = TextAnchor.MiddleRight;
+                combatTimerText.color = PacificRimUITheme.BlueBright;
+                combatTimerText.raycastTarget = false;
+                combatTimerText.text = "TIME: 00:00";
+                RectTransform tRt = tGo.GetComponent<RectTransform>();
+                tRt.anchorMin = new Vector2(0.52f, 0f);
+                tRt.anchorMax = new Vector2(1f, 1f);
+                tRt.offsetMin = Vector2.zero;
+                tRt.offsetMax = Vector2.zero;
+
+                timerContainer = rowGo;
+
+                // Adjust linkStatusText to sit on bottom row
+                if (linkStatusText != null)
+                {
+                    RectTransform lRt = linkStatusText.rectTransform;
+                    lRt.anchorMin = new Vector2(0f, 0f);
+                    lRt.anchorMax = new Vector2(1f, 0f);
+                    lRt.pivot = new Vector2(1f, 0f);
+                    lRt.anchoredPosition = new Vector2(0f, 0f);
+                    lRt.sizeDelta = new Vector2(0f, 22f);
+                }
+            }
+            else
+            {
+                if (combatTimerText == null)
+                {
+                    Transform t = row.Find("CombatTimerText");
+                    if (t != null) combatTimerText = t.GetComponent<Text>();
+                }
+                if (bestTimeText == null)
+                {
+                    Transform b = row.Find("BestTimeText");
+                    if (b != null) bestTimeText = b.GetComponent<Text>();
+                }
+            }
         }
     }
 }

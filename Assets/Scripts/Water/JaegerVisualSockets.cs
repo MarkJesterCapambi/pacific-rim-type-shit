@@ -32,6 +32,13 @@ namespace PacificRimWater
         [SerializeField] private ParticleSystem[] rocketSystemsR;
         [SerializeField] private Light rocketLightL;
         [SerializeField] private Light rocketLightR;
+        [SerializeField] private MeshRenderer exhaustMeshRendererL;
+        [SerializeField] private MeshRenderer exhaustMeshRendererR;
+
+        private Vector3 rocketBoneOffsetL = new Vector3(-0.003062f, 0.001459f, -0.002963f);
+        private Quaternion rocketBoneRotL = new Quaternion(0.198929f, 0.806624f, -0.486027f, 0.271224f);
+        private Vector3 rocketBoneOffsetR = new Vector3(0.003046f, 0.001429f, -0.003046f);
+        private Quaternion rocketBoneRotR = new Quaternion(-0.230915f, 0.797251f, -0.490104f, -0.266208f);
 
         [Header("Volumetric Light Components")]
         [SerializeField] private Light headSpotLight;
@@ -67,6 +74,28 @@ namespace PacificRimWater
             SetRocketBlastActive(false, immediate: true);
         }
 
+        private void LateUpdate()
+        {
+            UpdateRocketTransforms();
+        }
+
+        public void UpdateRocketTransforms()
+        {
+            if (chestBone == null) return;
+
+            if (rocketOriginL != null && rocketOriginL.parent != chestBone)
+            {
+                rocketOriginL.position = chestBone.TransformPoint(rocketBoneOffsetL);
+                rocketOriginL.rotation = chestBone.rotation * rocketBoneRotL;
+            }
+
+            if (rocketOriginR != null && rocketOriginR.parent != chestBone)
+            {
+                rocketOriginR.position = chestBone.TransformPoint(rocketBoneOffsetR);
+                rocketOriginR.rotation = chestBone.rotation * rocketBoneRotR;
+            }
+        }
+
         public void ResolveReferences()
         {
             if (chestBone == null || headBone == null)
@@ -91,18 +120,51 @@ namespace PacificRimWater
                 }
             }
 
+            // Bone scale isolation: unparent rockets from the shrunken DCC bone hierarchy to the Jaeger root
+            // so particle systems, light ranges, and thruster meshes operate at true 1-meter world scale.
+            if (chestBone != null)
+            {
+                if (rocketOriginL != null && rocketOriginL.parent == chestBone)
+                {
+                    rocketBoneOffsetL = rocketOriginL.localPosition;
+                    rocketBoneRotL = rocketOriginL.localRotation;
+                    rocketOriginL.SetParent(transform, true);
+                    rocketOriginL.localScale = Vector3.one;
+                }
+                if (rocketOriginR != null && rocketOriginR.parent == chestBone)
+                {
+                    rocketBoneOffsetR = rocketOriginR.localPosition;
+                    rocketBoneRotR = rocketOriginR.localRotation;
+                    rocketOriginR.SetParent(transform, true);
+                    rocketOriginR.localScale = Vector3.one;
+                }
+                UpdateRocketTransforms();
+            }
+
             if (rocketOriginL != null)
             {
                 rocketSystemsL = rocketOriginL.GetComponentsInChildren<ParticleSystem>(true);
                 rocketLightL = rocketOriginL.GetComponentInChildren<Light>(true);
-                if (rocketLightL != null) originalLightIntensityL = rocketLightL.intensity;
+                if (rocketLightL != null)
+                {
+                    if (rocketLightL.intensity > 100f) originalLightIntensityL = rocketLightL.intensity;
+                    else originalLightIntensityL = 4800f;
+                }
+                var emL = rocketOriginL.Find("ExhaustBeamMesh");
+                if (emL != null) exhaustMeshRendererL = emL.GetComponent<MeshRenderer>();
             }
 
             if (rocketOriginR != null)
             {
                 rocketSystemsR = rocketOriginR.GetComponentsInChildren<ParticleSystem>(true);
                 rocketLightR = rocketOriginR.GetComponentInChildren<Light>(true);
-                if (rocketLightR != null) originalLightIntensityR = rocketLightR.intensity;
+                if (rocketLightR != null)
+                {
+                    if (rocketLightR.intensity > 100f) originalLightIntensityR = rocketLightR.intensity;
+                    else originalLightIntensityR = 4800f;
+                }
+                var emR = rocketOriginR.Find("ExhaustBeamMesh");
+                if (emR != null) exhaustMeshRendererR = emR.GetComponent<MeshRenderer>();
             }
 
             if (headLightOrigin != null)
@@ -242,6 +304,9 @@ namespace PacificRimWater
 
         public void SetRocketBlastActive(bool active, bool immediate = false)
         {
+            if (exhaustMeshRendererL != null) exhaustMeshRendererL.enabled = active;
+            if (exhaustMeshRendererR != null) exhaustMeshRendererR.enabled = active;
+
             if (rocketSystemsL != null)
             {
                 for (int i = 0; i < rocketSystemsL.Length; i++)

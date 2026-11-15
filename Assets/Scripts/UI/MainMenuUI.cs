@@ -42,6 +42,7 @@ namespace PacificRimUI
         [SerializeField] private UnityEngine.UI.Text pauseSubtitleText;
         [SerializeField] private UnityEngine.UI.Text pauseHealthText;
         [SerializeField] private UnityEngine.UI.Text pauseMissionText;
+        [SerializeField] private UnityEngine.UI.Text menuBestTimeText;
 
         [Header("Modals")]
         [SerializeField] private PacificRimModal controlsModal;
@@ -103,11 +104,11 @@ namespace PacificRimUI
                 }
                 if (pauseSubtitleText != null)
                 {
-                    pauseSubtitleText.text = "PAN PACIFIC DEFENSE CORPS // TACTICAL COMMAND INTERFACE";
+                    pauseSubtitleText.text = "PPDC TACTICAL COMMAND // MISSION: DEFEND STRIKER EUREKA";
                 }
                 if (pauseMissionText != null)
                 {
-                    pauseMissionText.text = "MISSION OBJECTIVE: INTERCEPT CATEGORY IV KAIJU 'LEATHERBACK'";
+                    pauseMissionText.text = "MISSION OBJECTIVE: INTERCEPT LEATHERBACK // SAVE STRIKER EUREKA";
                 }
             }
             else
@@ -129,11 +130,11 @@ namespace PacificRimUI
                 }
                 if (pauseSubtitleText != null)
                 {
-                    pauseSubtitleText.text = "PPDC COMMAND // DRIFT ARCHIVE & TELEMETRY";
+                    pauseSubtitleText.text = "MISSION DIRECTIVE // DEFEND STRIKER EUREKA";
                 }
                 if (jaegerHud != null)
                 {
-                    jaegerHud.ShowBanner("NEURAL HANDSHAKE COMPLETE // ENGAGE", 3.5f);
+                    jaegerHud.ShowBanner("MISSION: SAVE STRIKER EUREKA // ENGAGE LEATHERBACK", 4.0f);
                 }
             }
 
@@ -147,6 +148,8 @@ namespace PacificRimUI
                 var t = menuVisualsRoot.transform.Find("Pause_DialogBox/Pause_Subtitle");
                 if (t != null) pauseSubtitleText = t.GetComponent<UnityEngine.UI.Text>();
             }
+
+            UpdateBestTimeDisplay();
         }
 
         private void OnDestroy()
@@ -321,7 +324,7 @@ namespace PacificRimUI
             }
             if (pauseMissionText != null)
             {
-                pauseMissionText.text = "NEURAL DRIFT LINK COLLAPSED // JAEGER HULL BREACHED";
+                pauseMissionText.text = "GIPSY DANGER COMPROMISED // STRIKER EUREKA LOST TO LEATHERBACK";
             }
         }
 
@@ -347,7 +350,7 @@ namespace PacificRimUI
             }
             if (pauseSubtitleText != null)
             {
-                pauseSubtitleText.text = "PACIFIC DEFENSE COMMAND // LEATHERBACK ELIMINATED";
+                pauseSubtitleText.text = "PACIFIC DEFENSE COMMAND // LEATHERBACK ELIMINATED // STRIKER EUREKA SAVED";
                 pauseSubtitleText.color = PacificRimUITheme.Success;
             }
             if (pauseHealthText != null)
@@ -360,9 +363,15 @@ namespace PacificRimUI
             }
             if (pauseMissionText != null)
             {
-                pauseMissionText.text = "THE PACIFIC BASIN IS SECURED // THE SHATTERDOME COMMENDS YOU, RANGER";
-                pauseMissionText.color = PacificRimUITheme.Text;
+                float finishTime = JaegerHUD.Instance != null ? JaegerHUD.Instance.CurrentCombatTime : 0f;
+                float bestTime = PacificRimCombatRecords.GetBestTime();
+                string finishStr = PacificRimCombatRecords.FormatTime(finishTime);
+                string bestStr = PacificRimCombatRecords.FormatTime(bestTime);
+                pauseMissionText.text = $"MISSION CLEAR: {finishStr}  //  BEST TIME: {bestStr}";
+                pauseMissionText.color = PacificRimUITheme.Amber;
             }
+
+            UpdateBestTimeDisplay();
 
             PacificRimUISound.PlaySuccess();
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDCheatActivated();
@@ -413,12 +422,13 @@ namespace PacificRimUI
                     if (pauseSubtitleText != null)
                     {
                         pauseSubtitleText.text = isMainMenuScene
-                            ? "PAN PACIFIC DEFENSE CORPS // TACTICAL COMMAND INTERFACE"
-                            : "PPDC COMMAND // DRIFT ARCHIVE & TELEMETRY";
+                            ? "PPDC TACTICAL COMMAND // MISSION: DEFEND STRIKER EUREKA"
+                            : "MISSION DIRECTIVE // DEFEND STRIKER EUREKA";
                         pauseSubtitleText.color = PacificRimUITheme.TextDim;
                     }
                 }
                 UpdateTelemetry();
+                UpdateBestTimeDisplay();
             }
 
             if (Application.isPlaying)
@@ -536,8 +546,38 @@ namespace PacificRimUI
             if (jaeger != null && pauseMissionText != null)
             {
                 pauseMissionText.text = jaeger.inCombatStance
-                    ? "COMBAT SYSTEMS: ENGAGED // MELEE READY"
-                    : "COMBAT SYSTEMS: STANDBY // PATROL READY";
+                    ? "MISSION: SAVE STRIKER EUREKA // MELEE COMBAT ENGAGED"
+                    : "MISSION: SAVE STRIKER EUREKA // INTERCEPT LEATHERBACK";
+            }
+        }
+
+        public void UpdateBestTimeDisplay()
+        {
+            float bestSeconds = PacificRimCombatRecords.GetBestTime();
+            string bestStr = PacificRimCombatRecords.FormatTime(bestSeconds);
+
+            if (menuBestTimeText != null)
+            {
+                menuBestTimeText.text = $"BEST SPEEDRUN: {bestStr}";
+                menuBestTimeText.color = PacificRimUITheme.Amber;
+            }
+
+            if (menuVisualsRoot != null)
+            {
+                // Sector status in top tab bar
+                var sectorTxt = menuVisualsRoot.transform.Find("Top_TabBar/SectorStatus")?.GetComponent<UnityEngine.UI.Text>();
+                if (sectorTxt != null)
+                {
+                    sectorTxt.text = $"SHATTERDOME // SECTOR 07  [BEST TIME: {bestStr}]";
+                }
+
+                // OpRow in Operation tab
+                var opRowBest = menuVisualsRoot.transform.Find("SafeContentArea/Left_HeroColumn/TabPages_Container/Page_Operation/OpRow_BestRecord/Value")?.GetComponent<UnityEngine.UI.Text>();
+                if (opRowBest != null)
+                {
+                    opRowBest.text = bestStr;
+                    opRowBest.color = PacificRimUITheme.Amber;
+                }
             }
         }
 

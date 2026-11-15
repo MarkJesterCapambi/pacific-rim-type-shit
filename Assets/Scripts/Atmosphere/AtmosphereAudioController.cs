@@ -88,9 +88,9 @@ namespace PacificRimAtmosphere
 
         public void EnsureAudioSources()
         {
-            if (sirenSource == null) sirenSource = CreateAudioSource("SirenSource", 0.40f);
-            if (foghornSource == null) foghornSource = CreateAudioSource("FoghornSource", 0.60f);
-            if (metalCreakSource == null) metalCreakSource = CreateAudioSource("MetalCreakSource", 0.45f);
+            if (sirenSource == null) sirenSource = CreateAudioSource("SirenSource", 0.10f);
+            if (foghornSource == null) foghornSource = CreateAudioSource("FoghornSource", 0.15f);
+            if (metalCreakSource == null) metalCreakSource = CreateAudioSource("MetalCreakSource", 0.11f);
         }
 
         public void EnsureRealClips()

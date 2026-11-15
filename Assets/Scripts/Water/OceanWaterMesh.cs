@@ -45,6 +45,14 @@ namespace PacificRimWater
 
         private static readonly int IdLeftLegWS = Shader.PropertyToID("_JaegerLeftLegWS");
         private static readonly int IdRightLegWS = Shader.PropertyToID("_JaegerRightLegWS");
+        private static readonly int IdJaegerVelocityWS = Shader.PropertyToID("_JaegerVelocityWS");
+        private static readonly int IdKaijuPositionWS = Shader.PropertyToID("_KaijuPositionWS");
+        private static readonly int IdKaijuVelocityWS = Shader.PropertyToID("_KaijuVelocityWS");
+
+        private Vector3 prevJaegerPos;
+        private Vector3 prevKaijuPos;
+        private Transform kaijuTransform;
+        private bool hasInitializedTracking = false;
 
         void OnEnable()
         {
@@ -168,11 +176,22 @@ namespace PacificRimWater
             }
 
             Transform target = followTarget != null ? followTarget : (waterSystem != null ? waterSystem.followTarget : null);
-            if (target != null && dx > 0.001f && dz > 0.001f)
+            Vector3 jaegerVel = Vector3.zero;
+            if (target != null)
             {
-                float snappedX = Mathf.Round(target.position.x / dx) * dx;
-                float snappedZ = Mathf.Round(target.position.z / dz) * dz;
-                transform.position = new Vector3(snappedX, transform.position.y, snappedZ);
+                if (!hasInitializedTracking)
+                {
+                    prevJaegerPos = target.position;
+                }
+                jaegerVel = (target.position - prevJaegerPos) / Mathf.Max(0.0001f, Time.deltaTime);
+                prevJaegerPos = target.position;
+
+                if (dx > 0.001f && dz > 0.001f)
+                {
+                    float snappedX = Mathf.Round(target.position.x / dx) * dx;
+                    float snappedZ = Mathf.Round(target.position.z / dz) * dz;
+                    transform.position = new Vector3(snappedX, transform.position.y, snappedZ);
+                }
 
                 if (jaegerInteraction == null)
                 {
@@ -180,18 +199,54 @@ namespace PacificRimWater
                 }
             }
 
+            float jSpeed = new Vector2(jaegerVel.x, jaegerVel.z).magnitude;
+            Shader.SetGlobalVector(IdJaegerVelocityWS, new Vector4(jaegerVel.x, 0f, jaegerVel.z, jSpeed));
+
             if (jaegerInteraction != null && jaegerInteraction.IsWading)
             {
                 Vector3 leftLeg = jaegerInteraction.LeftLegSurfacePoint;
                 Vector3 rightLeg = jaegerInteraction.RightLegSurfacePoint;
-                Shader.SetGlobalVector(IdLeftLegWS, new Vector4(leftLeg.x, leftLeg.y, leftLeg.z, 1f));
-                Shader.SetGlobalVector(IdRightLegWS, new Vector4(rightLeg.x, rightLeg.y, rightLeg.z, Mathf.Max(1.0f, jaegerInteraction.legWidth)));
+                float legRad = Mathf.Max(2.2f, jaegerInteraction.legWidth * 0.95f);
+                Shader.SetGlobalVector(IdLeftLegWS, new Vector4(leftLeg.x, leftLeg.y, leftLeg.z, legRad));
+                Shader.SetGlobalVector(IdRightLegWS, new Vector4(rightLeg.x, rightLeg.y, rightLeg.z, legRad));
             }
             else
             {
                 Shader.SetGlobalVector(IdLeftLegWS, Vector4.zero);
                 Shader.SetGlobalVector(IdRightLegWS, Vector4.zero);
             }
+
+            // Track Kaiju position and velocity for reactive titan water displacement
+            if (kaijuTransform == null)
+            {
+                var kaijuGo = GameObject.Find("Kaiju_Leatherback");
+                if (kaijuGo != null)
+                {
+                    kaijuTransform = kaijuGo.transform;
+                    prevKaijuPos = kaijuTransform.position;
+                }
+            }
+
+            if (kaijuTransform != null)
+            {
+                if (!hasInitializedTracking)
+                {
+                    prevKaijuPos = kaijuTransform.position;
+                }
+                Vector3 kaijuVel = (kaijuTransform.position - prevKaijuPos) / Mathf.Max(0.0001f, Time.deltaTime);
+                prevKaijuPos = kaijuTransform.position;
+                Vector3 kPos = kaijuTransform.position;
+                float kSpeed = new Vector2(kaijuVel.x, kaijuVel.z).magnitude;
+                Shader.SetGlobalVector(IdKaijuPositionWS, new Vector4(kPos.x, kPos.y, kPos.z, 4.8f));
+                Shader.SetGlobalVector(IdKaijuVelocityWS, new Vector4(kaijuVel.x, 0f, kaijuVel.z, kSpeed));
+            }
+            else
+            {
+                Shader.SetGlobalVector(IdKaijuPositionWS, Vector4.zero);
+                Shader.SetGlobalVector(IdKaijuVelocityWS, Vector4.zero);
+            }
+
+            hasInitializedTracking = true;
         }
     }
 }

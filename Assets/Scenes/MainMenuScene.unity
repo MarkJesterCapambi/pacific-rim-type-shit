@@ -389,7 +389,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 1
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: OPERATION PITFALL // MARK-III NUCLEAR VORTEX TURBINE
+  m_Text: 'PPDC TACTICAL COMMAND // MISSION: DEFEND STRIKER EUREKA'
 --- !u!222 &6572958
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -2595,7 +2595,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
   m_AnchoredPosition: {x: 0, y: -64}
-  m_SizeDelta: {x: 0, y: 64}
+  m_SizeDelta: {x: 0, y: 68}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &162000928
 MonoBehaviour:
@@ -2619,7 +2619,7 @@ MonoBehaviour:
       m_Calls: []
   m_FontData:
     m_Font: {fileID: 12800000, guid: e3265ab4bf004d28a9537516768c1c75, type: 3}
-    m_FontSize: 54
+    m_FontSize: 40
     m_FontStyle: 0
     m_BestFit: 0
     m_MinSize: 10
@@ -2630,7 +2630,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 1
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: PACIFIC RIM
+  m_Text: 'PACIFIC RIM: OPERATION PITFALL'
 --- !u!222 &162000929
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -4131,7 +4131,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 1
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: TYPHOON FORCE // LIGHTNING WATCH
+  m_Text: SAVE STRIKER EUREKA // INTERCEPT LEATHERBACK
 --- !u!222 &319911857
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -4433,7 +4433,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 1
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: 'GIPSY DANGER [MARK-III]'
+  m_Text: 'STRIKER EUREKA: DISABLED // UNDER ATTACK'
 --- !u!222 &343381165
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -6317,7 +6317,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 1
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: SHATTERDOME LAUNCH
+  m_Text: SAVE STRIKER EUREKA
 --- !u!222 &508148895
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -7358,7 +7358,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 1
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: THEATER CONDITION
+  m_Text: PRIMARY DIRECTIVE
 --- !u!222 &589353245
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -14637,7 +14637,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 1
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: Typhoon Harbor Patrol // Storm Watch
+  m_Text: Defend paralyzed Striker Eureka against Leatherback
 --- !u!222 &1331746549
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -15942,7 +15942,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 1
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: 01 // INTERCEPT
+  m_Text: 01 // OPERATION PITFALL
 --- !u!222 &1461570895
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -16608,7 +16608,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
   m_AnchoredPosition: {x: 0, y: -8}
-  m_SizeDelta: {x: 0, y: 108}
+  m_SizeDelta: {x: 0, y: 112}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1522038385
 MonoBehaviour:
@@ -16632,7 +16632,7 @@ MonoBehaviour:
       m_Calls: []
   m_FontData:
     m_Font: {fileID: 12800000, guid: e3265ab4bf004d28a9537516768c1c75, type: 3}
-    m_FontSize: 17
+    m_FontSize: 14
     m_FontStyle: 0
     m_BestFit: 0
     m_MinSize: 10
@@ -16642,11 +16642,12 @@ MonoBehaviour:
     m_RichText: 1
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
-    m_LineSpacing: 1.25
-  m_Text: Category-class storm conditions detected across Hong Kong Bay. Dual-pilot
-    neural handshake stabilized. Strike with LMB/RMB for light and heavy melee combos,
-    raise Defense Matrix [F] to absorb heavy impacts, or cycle Turbine Overcharge
-    [Q].
+    m_LineSpacing: 1.2
+  m_Text: "CRITICAL MISSION DIRECTIVE: Category IV Kaiju 'LEATHERBACK' has ambushed
+    Hong Kong Bay and detonated an organic EMP wave, causing total electrical and
+    neural shutdown to Striker Eureka. With Striker paralyzed and defenseless, Gipsy
+    Danger is deployed via heavy tactical airdrop to draw Leatherback's aggression,
+    intercept the Kaiju, and save Striker Eureka from imminent destruction."
 --- !u!222 &1522038386
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -17885,7 +17886,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 1
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: DEPLOYED JAEGER
+  m_Text: ALLIED STATUS
 --- !u!222 &1701490022
 CanvasRenderer:
   m_ObjectHideFlags: 0

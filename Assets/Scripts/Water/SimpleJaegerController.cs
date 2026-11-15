@@ -99,6 +99,11 @@ namespace PacificRimWater
         private Coroutine activeDelayedStrikeCoroutine = null;
         private float sprintAttackEndTime = -10f;
 
+        [Header("Sprint Attack Lunge Momentum")]
+        [Tooltip("Deceleration drag for the heavy 2,000-ton Jaeger forward jump lunge.")]
+        public float lungeDrag = 14.5f;
+        private Vector3 lungeVelocity = Vector3.zero;
+
         public bool IsHitStaggered => Time.time < hitAttackDisallowedUntil;
         public bool IsSprintAttacking => Time.time < sprintAttackEndTime;
 
@@ -665,6 +670,21 @@ namespace PacificRimWater
             if (IsDead)
             {
                 targetVelocity = Vector3.zero;
+                lungeVelocity = Vector3.zero;
+            }
+
+            // Sprint-heavy jump attack lunge physics:
+            // Forward leaping momentum carries the heavy 2,000-ton Jaeger through the air,
+            // decaying naturally under heavy mech inertia and ocean drag.
+            // Player directional input CANNOT abruptly stop or cancel this colossal forward leap momentum midair!
+            if (IsSprintAttacking)
+            {
+                targetVelocity = lungeVelocity;
+                lungeVelocity = Vector3.MoveTowards(lungeVelocity, Vector3.zero, lungeDrag * Time.fixedDeltaTime);
+            }
+            else
+            {
+                lungeVelocity = Vector3.zero;
             }
 
 #if UNITY_6000_0_OR_NEWER
@@ -673,7 +693,8 @@ namespace PacificRimWater
             Vector3 currentVel = rb.velocity;
 #endif
             Vector3 horizontalVel = new Vector3(currentVel.x, 0f, currentVel.z);
-            Vector3 newHorizVel = Vector3.Lerp(horizontalVel, targetVelocity, Time.fixedDeltaTime * acceleration);
+            float currentAccel = IsSprintAttacking ? 22f : acceleration;
+            Vector3 newHorizVel = Vector3.Lerp(horizontalVel, targetVelocity, Time.fixedDeltaTime * currentAccel);
 
 #if UNITY_6000_0_OR_NEWER
             rb.linearVelocity = new Vector3(newHorizVel.x, currentVel.y, newHorizVel.z);
@@ -1003,10 +1024,15 @@ namespace PacificRimWater
             if (runningAttack)
             {
                 sprintAttackEndTime = heavyAttackEndTime;
+                // Forward jump lunge momentum: decaying forward velocity carrying the 2,000-ton Jaeger
+                Vector3 launchDirection = transform.forward;
+                float initialLungeSpeed = Mathf.Max(runSpeed * 1.08f, 32f);
+                lungeVelocity = launchDirection * initialLungeSpeed;
             }
             else
             {
                 sprintAttackEndTime = -10f;
+                lungeVelocity = Vector3.zero;
             }
 
             if (animator != null)
@@ -1329,6 +1355,7 @@ namespace PacificRimWater
         private void Die()
         {
             sprintAttackEndTime = -10f;
+            lungeVelocity = Vector3.zero;
             if (activeDelayedStrikeCoroutine != null)
             {
                 StopCoroutine(activeDelayedStrikeCoroutine);

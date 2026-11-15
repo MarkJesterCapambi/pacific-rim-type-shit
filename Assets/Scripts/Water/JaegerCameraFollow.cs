@@ -9,6 +9,8 @@ namespace PacificRimWater
     /// </summary>
     public class JaegerCameraFollow : MonoBehaviour
     {
+        public static JaegerCameraFollow Instance { get; private set; }
+
         [Header("Target")]
         [Tooltip("Transform of the Jaeger Mech to track.")]
         public Transform target;
@@ -26,6 +28,21 @@ namespace PacificRimWater
         public float followDamping = 6f;
         [Tooltip("Smooth rotation lag factor.")]
         public float rotationDamping = 5f;
+
+        [Header("Field of View")]
+        [Tooltip("Base field of view in degrees.")]
+        public float baseFieldOfView = 50f;
+        [Tooltip("Cinematic telephoto field of view during deployment cutscene.")]
+        public float cutsceneFieldOfView = 40f;
+
+        [Header("Attack Zoom Dynamics")]
+        [Tooltip("Additional camera follow distance during heavy jump-sprint lunge attacks.")]
+        public float attackZoomExtraDistance = 8.5f;
+        [Tooltip("Additional camera FOV during heavy jump-sprint lunge attacks.")]
+        public float attackZoomExtraFOV = 4.0f;
+        private float currentAttackExtraDist = 0f;
+        private float currentAttackExtraFov = 0f;
+        private Camera cam;
 
         [Header("Crosshair")]
         [Tooltip("Display a simple small tactical dot crosshair in the center of the screen.")]
@@ -77,6 +94,16 @@ namespace PacificRimWater
             set => currentYaw = value;
         }
 
+        private void Awake()
+        {
+            Instance = this;
+            cam = GetComponent<Camera>();
+            if (cam != null)
+            {
+                cam.fieldOfView = baseFieldOfView;
+            }
+        }
+
         void Start()
         {
             if (target == null)
@@ -84,6 +111,9 @@ namespace PacificRimWater
                 var jaeger = GameObject.Find("Jaeger_Mech");
                 if (jaeger != null) target = jaeger.transform;
             }
+
+            if (cam == null) cam = GetComponent<Camera>();
+            if (cam != null) cam.fieldOfView = baseFieldOfView;
 
             // Ensure camera is NOT a child of a scaled object to prevent non-uniform scale distortion
             if (transform.parent != null)
@@ -172,7 +202,7 @@ namespace PacificRimWater
                 currentPitch = Mathf.Clamp(currentPitch, activeMinPitch, activeMaxPitch);
             }
 
-            // Scroll-wheel distance zooming in freecam mode
+            // Distance zooming in freecam mode: Mouse ScrollWheel & Arrow Keys Up/Down
             if (isFreeCam)
             {
                 float scroll = 0f;
@@ -187,12 +217,47 @@ namespace PacificRimWater
                 {
                     freeCamDistance = Mathf.Clamp(freeCamDistance - scroll * freeCamZoomSpeed, freeCamMinDistance, freeCamMaxDistance);
                 }
+
+                // Arrow keys Up and Down zooming
+                float arrowZoom = 0f;
+                try
+                {
+                    if (Input.GetKey(KeyCode.UpArrow)) arrowZoom += 1f;
+                    if (Input.GetKey(KeyCode.DownArrow)) arrowZoom -= 1f;
+                }
+                catch {}
+#if ENABLE_INPUT_SYSTEM
+                if (UnityEngine.InputSystem.Keyboard.current != null)
+                {
+                    var kb = UnityEngine.InputSystem.Keyboard.current;
+                    if (kb.upArrowKey.isPressed) arrowZoom += 1f;
+                    if (kb.downArrowKey.isPressed) arrowZoom -= 1f;
+                }
+#endif
+                if (Mathf.Abs(arrowZoom) > 0.01f)
+                {
+                    // Up arrow zooms IN (decreases distance), Down arrow zooms OUT (increases distance)
+                    freeCamDistance = Mathf.Clamp(freeCamDistance - arrowZoom * (freeCamZoomSpeed * 1.6f) * Time.deltaTime, freeCamMinDistance, freeCamMaxDistance);
+                }
+            }
+
+            // Sprint-heavy jump attack dynamic camera zoom out
+            bool isSprintAttacking = !isFreeCam && SimpleJaegerController.Instance != null && SimpleJaegerController.Instance.IsSprintAttacking;
+            float targetExtraDist = isSprintAttacking ? attackZoomExtraDistance : 0f;
+            float targetExtraFov = isSprintAttacking ? attackZoomExtraFOV : 0f;
+            currentAttackExtraDist = Mathf.Lerp(currentAttackExtraDist, targetExtraDist, Time.deltaTime * (isSprintAttacking ? 5.5f : 3.0f));
+            currentAttackExtraFov = Mathf.Lerp(currentAttackExtraFov, targetExtraFov, Time.deltaTime * (isSprintAttacking ? 5.5f : 3.0f));
+
+            if (cam != null && activeCutsceneTransition == null)
+            {
+                float activeBaseFov = isCutsceneFreeCam ? cutsceneFieldOfView : baseFieldOfView;
+                cam.fieldOfView = activeBaseFov + currentAttackExtraFov;
             }
 
             Quaternion yawRotation = Quaternion.Euler(0f, currentYaw, 0f);
             Quaternion targetRotation = Quaternion.Euler(currentPitch, currentYaw, 0f);
             float effectiveShoulderOffset = isFreeCam ? 0f : rightShoulderOffset;
-            float effectiveDistance = isFreeCam ? freeCamDistance : distance;
+            float effectiveDistance = isFreeCam ? freeCamDistance : (distance + currentAttackExtraDist);
             Vector3 orbitCenter = target.position + targetOffset + (yawRotation * Vector3.right * effectiveShoulderOffset) + (isFreeCam ? Vector3.zero : Vector3.up * height);
             Vector3 desiredPosition = orbitCenter - (targetRotation * Vector3.forward * effectiveDistance);
 
@@ -300,6 +365,88 @@ namespace PacificRimWater
                 freeCamDistance = distance;
                 PacificRimUI.JaegerHUD.Instance?.ShowBanner("FREECAM INSPECT // UNRESTRICTED ANGLE & UNDERWATER ACTIVE", 2.5f);
             }
+        }
+
+        private Coroutine activeCutsceneTransition;
+        public bool isCutsceneFreeCam = false;
+
+        /// <summary>
+        /// Activates high-altitude zoomed-out freecam during the aerial deployment cutscene,
+        /// allowing the player to look around at the stormy skies, Chinooks, and Kaiju.
+        /// </summary>
+        public void EnableCutsceneFreeCam(float initialDistance = 72f, float initialPitch = 20f)
+        {
+            if (activeCutsceneTransition != null)
+            {
+                StopCoroutine(activeCutsceneTransition);
+                activeCutsceneTransition = null;
+            }
+
+            isCutsceneFreeCam = true;
+            isFreeCam = true;
+            freeCamDistance = initialDistance;
+            freeCamMinDistance = 12f;
+            freeCamMaxDistance = 140f;
+            currentPitch = initialPitch;
+            if (cam != null) cam.fieldOfView = cutsceneFieldOfView;
+            if (target != null) currentYaw = target.eulerAngles.y - 25f;
+            hasSmoothedBasePos = false;
+        }
+
+        /// <summary>
+        /// Seamlessly terminates cutscene freecam and glides the camera back to its natural
+        /// over-the-shoulder combat position as the deployment cutscene concludes.
+        /// </summary>
+        public void SmoothTransitionToOverTheShoulder(float duration = 1.8f)
+        {
+            if (activeCutsceneTransition != null)
+            {
+                StopCoroutine(activeCutsceneTransition);
+            }
+            activeCutsceneTransition = StartCoroutine(CutsceneTransitionRoutine(duration));
+        }
+
+        private System.Collections.IEnumerator CutsceneTransitionRoutine(float duration)
+        {
+            isCutsceneFreeCam = false;
+            float elapsed = 0f;
+
+            float fromDist = freeCamDistance;
+            float toDist = distance;
+
+            float fromPitch = currentPitch;
+            float toPitch = 14f;
+
+            float fromYaw = currentYaw;
+            float toYaw = target != null ? target.eulerAngles.y : currentYaw;
+            float yawDiff = Mathf.DeltaAngle(fromYaw, toYaw);
+
+            float fromFov = cutsceneFieldOfView;
+            float toFov = baseFieldOfView;
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / duration));
+
+                freeCamDistance = Mathf.Lerp(fromDist, toDist, t);
+                currentPitch = Mathf.Lerp(fromPitch, toPitch, t);
+                currentYaw = fromYaw + yawDiff * t;
+                if (cam != null)
+                {
+                    cam.fieldOfView = Mathf.Lerp(fromFov, toFov, t);
+                }
+
+                yield return null;
+            }
+
+            if (cam != null) cam.fieldOfView = baseFieldOfView;
+
+            isFreeCam = false;
+            freeCamDistance = distance;
+            freeCamMinDistance = 4f;
+            freeCamMaxDistance = 80f;
+            activeCutsceneTransition = null;
         }
 
         private static bool WasFreeCamTogglePressedThisFrame()

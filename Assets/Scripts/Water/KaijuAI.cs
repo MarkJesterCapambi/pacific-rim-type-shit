@@ -97,10 +97,10 @@ namespace PacificRimWater
 
         [Header("Ocean Shockwaves & Wading")]
         public float strideDistance = 7.5f;
-        public float footstepWaveRadius = 14f;
-        public float footstepWaveStrength = 0.25f;
-        public float slamWaveRadius = 26f;
-        public float slamWaveStrength = 0.35f;
+        public float footstepWaveRadius = 18f;
+        public float footstepWaveStrength = 2.4f;
+        public float slamWaveRadius = 30f;
+        public float slamWaveStrength = 2.8f;
 
         [Header("Procedural Spine & Lateral Strafe IK")]
         public bool enableProceduralIK = true;
@@ -1061,7 +1061,7 @@ namespace PacificRimWater
             Vector3 center = transform.position + transform.forward * 4f;
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayEmpDischargeBlast(center + Vector3.up * 10f);
             PacificRimAudio.PacificRimAudioManager.Instance?.SetKaijuEmpSparksLoop(true, transform.position + Vector3.up * 14f);
-            EmitOceanImpact(center, transform.forward, 28f, 0.25f, 3.2f, true, 1.4f);
+            EmitOceanImpact(center, transform.forward, 32f, 2.8f, 3.2f, true, 1.4f);
 
             Camera cam = Camera.main;
             if (cam != null)
@@ -1124,7 +1124,7 @@ namespace PacificRimWater
             Vector3 pulsePos = transform.position + transform.forward * 4f;
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayEmpDischargeBlast(pulsePos + Vector3.up * 10f);
             PacificRimAudio.PacificRimAudioManager.Instance?.SetKaijuEmpSparksLoop(true, transform.position + Vector3.up * 14f);
-            EmitOceanImpact(pulsePos, Vector3.up, 34f, 0.35f, 3.4f, true, 1.8f);
+            EmitOceanImpact(pulsePos, Vector3.up, 36f, 3.2f, 3.4f, true, 1.8f);
             WaterSplashManager.Instance?.SpawnCombatSparks(pulsePos + Vector3.up * 12f, Vector3.up, false, true, true);
 
             yield return new WaitForSeconds(EmpClipLength * 0.55f);
@@ -1399,7 +1399,7 @@ namespace PacificRimWater
             {
                 PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuBite(impactPos);
             }
-            EmitOceanImpact(impactPos, transform.forward, isHeavy ? slamWaveRadius : 16f, isHeavy ? slamWaveStrength : 0.22f, isHeavy ? 2.6f : 1.4f, isHeavy, isHeavy ? 1.5f : 0.8f);
+            EmitOceanImpact(impactPos, transform.forward, isHeavy ? slamWaveRadius : 18f, isHeavy ? slamWaveStrength : 1.8f, isHeavy ? 2.6f : 1.4f, isHeavy, isHeavy ? 1.5f : 0.8f);
 
             if (isCutsceneMode)
             {
@@ -1637,7 +1637,7 @@ namespace PacificRimWater
         private IEnumerator DeathSplashRoutine()
         {
             yield return new WaitForSeconds(1.8f);
-            EmitOceanImpact(transform.position + transform.forward * 4f, Vector3.up, 32f, 0.38f, 3.5f, true, 1.8f);
+            EmitOceanImpact(transform.position + transform.forward * 4f, Vector3.up, 36f, 3.0f, 3.5f, true, 1.8f);
         }
 
         private IEnumerator VictorySequenceRoutine()

@@ -30,8 +30,9 @@ namespace PacificRimAtmosphere
 
         [Header("Global Volume Profile Overrides")]
         public Volume globalVolume;
-        [Range(0f, 5f)] public float bloomIntensity = 1.05f;
-        [Range(0.5f, 3f)] public float bloomThreshold = 1.15f;
+        [Range(0f, 5f)] public float bloomIntensity = 0.85f;
+        [Range(0.5f, 3f)] public float bloomThreshold = 0.98f;
+        [Range(0f, 1f)] public float bloomScatter = 0.78f;
         [Range(0f, 1f)] public float chromaticAberrationIntensity = 0.10f;
         [Range(0f, 1f)] public float vignetteIntensity = 0.22f;
         public Color vignetteColor = new Color(0.02f, 0.04f, 0.08f, 1f);
@@ -128,13 +129,13 @@ namespace PacificRimAtmosphere
             var profile = globalVolume.sharedProfile != null ? globalVolume.sharedProfile : globalVolume.profile;
             if (profile == null) return;
 
-            // 1. High-Threshold HDR Bloom
+            // 1. High-Threshold HDR Bloom with gentle sunray-like radial light scatter
             if (!profile.TryGet<Bloom>(out var bloom))
                 bloom = profile.Add<Bloom>(true);
             bloom.threshold.Override(bloomThreshold);
             bloom.intensity.Override(bloomIntensity);
-            bloom.scatter.Override(0.65f);
-            bloom.tint.Override(new Color(0.75f, 0.90f, 1.0f, 1f));
+            bloom.scatter.Override(bloomScatter);
+            bloom.tint.Override(new Color(0.85f, 0.94f, 1.0f, 1f));
 
             // 2. Subtle Chromatic Aberration
             if (!profile.TryGet<ChromaticAberration>(out var chroma))

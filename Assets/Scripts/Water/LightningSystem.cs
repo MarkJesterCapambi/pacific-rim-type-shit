@@ -11,10 +11,13 @@ namespace PacificRimWater
     [ExecuteAlways]
     public class LightningSystem : MonoBehaviour
     {
+        public static LightningSystem Instance { get; private set; }
+        public static System.Action OnLightningStrike;
+
         [Header("Global Illumination Flash Light")]
         [Tooltip("Dedicated directional light enabled only for 1-2 frames per lightning pulse.")]
         public Light flashDirectionalLight;
-        public float flashPeakIntensity = 3.6f;
+        public float flashPeakIntensity = 5.8f;
 
         [Header("Pooled Geometry & Billboards")]
         [Tooltip("Pre-baked pool of 3-5 low-poly 3D lightning bolt meshes.")]
@@ -24,10 +27,10 @@ namespace PacificRimWater
 
         [Header("Placement & Timing")]
         public Transform followCenter;
-        public float minStrikeInterval = 4.0f;
-        public float maxStrikeInterval = 8.0f;
+        public float minStrikeInterval = 2.2f;
+        public float maxStrikeInterval = 4.8f;
         public float boltDuration = 0.18f;
-        public float flashDecayDuration = 0.28f;
+        public float flashDecayDuration = 0.36f;
 
         public float CurrentFlashNormalized { get; private set; }
 
@@ -44,11 +47,13 @@ namespace PacificRimWater
 
         void Awake()
         {
+            Instance = this;
             InitializePool();
         }
 
         void OnEnable()
         {
+            Instance = this;
             InitializePool();
             if (!Application.isPlaying)
             {
@@ -62,6 +67,7 @@ namespace PacificRimWater
 
         void OnDisable()
         {
+            if (Instance == this) Instance = null;
             if (flashDirectionalLight != null)
             {
                 flashDirectionalLight.enabled = false;
@@ -114,9 +120,17 @@ namespace PacificRimWater
 
         private void ScheduleNextStrike()
         {
-            float minT = Mathf.Max(0.5f, minStrikeInterval);
-            float maxT = Mathf.Max(minT, maxStrikeInterval);
-            nextStrikeTime = Time.time + Random.Range(minT, maxT);
+            if (Random.value < 0.28f)
+            {
+                // Rapid second bolt / multi-pulse lightning burst
+                nextStrikeTime = Time.time + Random.Range(0.22f, 0.65f);
+            }
+            else
+            {
+                float minT = Mathf.Max(0.5f, minStrikeInterval);
+                float maxT = Mathf.Max(minT, maxStrikeInterval);
+                nextStrikeTime = Time.time + Random.Range(minT, maxT);
+            }
         }
 
         void Update()
@@ -263,6 +277,7 @@ namespace PacificRimWater
             flashStageFramesLeft = 2;
             flashDecayTimer = Mathf.Max(0.05f, flashDecayDuration);
             CurrentFlashNormalized = 1f;
+            OnLightningStrike?.Invoke();
         }
 
         private void UpdateFlashLightStateMachine()

@@ -35,11 +35,13 @@ namespace PacificRimWater
         private ParticleSystem foam;
         private ParticleSystem bubbles;
         private ParticleSystem sparks;
+        private ParticleSystem volumetricMist;
 
         private ParticleSystem.Particle[] dropletBuf;
         private ParticleSystem.Particle[] mistBuf;
         private ParticleSystem.Particle[] foamBuf;
         private ParticleSystem.Particle[] bubbleBuf;
+        private ParticleSystem.Particle[] volumetricMistBuf;
         private readonly List<Vector3> impactPoints = new List<Vector3>(32);
 
         private ParticleSystem.EmitParams emit;
@@ -70,7 +72,7 @@ namespace PacificRimWater
 
         private void EnsureSystems()
         {
-            if (built && droplets != null && mist != null && foam != null && bubbles != null && sparks != null) return;
+            if (built && droplets != null && mist != null && foam != null && bubbles != null && sparks != null && volumetricMist != null) return;
 
             // Remove any legacy single-system child created by older versions
             for (int i = transform.childCount - 1; i >= 0; i--)
@@ -119,6 +121,20 @@ namespace PacificRimWater
             sr.cameraVelocityScale = 0f;
             AddAlphaFade(sparks, 0.02f, 0.45f);
             AddSizeCurve(sparks, 1.0f, 0.25f);
+
+            // Volumetric Mist Cloud Layer for giant titan impacts (footsteps & cutscene landings)
+            // Soft, airy, non-intrusive volumetric atmospheric mist
+            Material volMistMat = MakeMaterial("Splash_VolumetricMist", SplashTextures.VolumetricMistPuff(), new Color(0.86f, 0.92f, 0.98f, 0.16f), 0.28f, 0.85f);
+            volumetricMist = BuildSystem("SplashVolumetricMist", volMistMat, ParticleSystemRenderMode.Billboard, 1500, -0.015f);
+            AddAlphaFade(volumetricMist, 0.03f, 0.16f);
+            AddSizeCurve(volumetricMist, 0.65f, 3.2f);
+            var vVol = volumetricMist.limitVelocityOverLifetime;
+            vVol.enabled = true;
+            vVol.limit = 1.8f;
+            vVol.dampen = 0.28f;
+            var rotOverLife = volumetricMist.rotationOverLifetime;
+            rotOverLife.enabled = true;
+            rotOverLife.z = new ParticleSystem.MinMaxCurve(-0.25f, 0.25f);
 
             built = true;
         }
@@ -229,6 +245,7 @@ namespace PacificRimWater
 
             UpdateDroplets(water);
             UpdateAirborne(mist, ref mistBuf);
+            UpdateAirborne(volumetricMist, ref volumetricMistBuf);
             UpdateSurfaceRiders(foam, ref foamBuf, water, 0.07f, 1.6f);
             UpdateSurfaceRiders(bubbles, ref bubbleBuf, water, 0.04f, 1.2f);
 
@@ -365,6 +382,21 @@ namespace PacificRimWater
             emit.startColor = new Color(1f, 1f, 1f, alpha);
             emit.rotation = Random.Range(0f, 360f);
             mist.Emit(emit, 1);
+        }
+
+        public void EmitVolumetricMist(Vector3 pos, Vector3 vel, float size, float alpha, float lifetime = 3.6f)
+        {
+            if (volumetricMist == null) return;
+            JaegerSplashClipGuard.PushOutAll(ref pos, ref vel, false);
+
+            emit.position = pos;
+            emit.velocity = vel;
+            emit.startSize = size;
+            emit.startLifetime = lifetime;
+            emit.startColor = new Color(1f, 1f, 1f, alpha);
+            emit.rotation = Random.Range(0f, 360f);
+            emit.angularVelocity = Random.Range(-18f, 18f);
+            volumetricMist.Emit(emit, 1);
         }
 
         private void EmitFoam(Vector3 pos, Vector3 vel, float size)
@@ -504,6 +536,27 @@ namespace PacificRimWater
                 EmitMist(position + off + Vector3.up * 0.4f, vel, Random.Range(2.2f, 4.5f) * scale, Random.Range(0.35f, 0.6f));
             }
 
+            // Colossal Volumetric Mist Cloud eruption for titan footstep impact (soft, airy, non-obscuring)
+            int volMistCount = 6 + Mathf.RoundToInt(6f * scale);
+            float baseMistSpread = splashSpread * 0.95f * scale;
+            for (int i = 0; i < volMistCount; i++)
+            {
+                float ang = Random.Range(0f, Mathf.PI * 2f);
+                Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                float dist = Random.Range(0.2f, 1.25f) * baseMistSpread;
+                Vector3 pos = position + radial * dist + Vector3.up * Random.Range(0.2f, 1.5f);
+
+                float outSpd = Random.Range(2.5f, 6.8f) * scale;
+                float upSpd = Random.Range(1.8f, 4.8f) * scale;
+                Vector3 vel = radial * outSpd + Vector3.up * upSpd;
+
+                float pSize = Random.Range(5.5f, 9.8f) * scale;
+                float pAlpha = Random.Range(0.10f, 0.20f);
+                float pLife = Random.Range(2.8f, 4.2f);
+
+                EmitVolumetricMist(pos, vel, pSize, pAlpha, pLife);
+            }
+
             int foamCount = 3 + Mathf.RoundToInt(5f * scale);
             for (int i = 0; i < foamCount; i++)
             {
@@ -575,6 +628,14 @@ namespace PacificRimWater
                 EmitMist(surfacePos + off, vel, Random.Range(3.5f, 7.5f) * clampedIntensity, Random.Range(0.4f, 0.75f));
             }
 
+            int volMistHeavyCount = isHeavy ? 12 : 6;
+            for (int i = 0; i < volMistHeavyCount; i++)
+            {
+                Vector3 off = forward * Random.Range(1f, 8f) + right * Random.Range(-4.5f, 4.5f) + Vector3.up * Random.Range(0.4f, 2.0f);
+                Vector3 vel = forward * Random.Range(4f, 12f) + Vector3.up * Random.Range(2.5f, 6.5f);
+                EmitVolumetricMist(surfacePos + off, vel, Random.Range(6.5f, 12.5f) * clampedIntensity, Random.Range(0.12f, 0.22f), Random.Range(2.8f, 4.4f));
+            }
+
             // Boiling frothing ocean foam bursting at the waterline
             int foamPatches = isHeavy ? 14 : 7;
             for (int i = 0; i < foamPatches; i++)
@@ -637,6 +698,26 @@ namespace PacificRimWater
                 Vector3 off = radial * Random.Range(1f, 8.5f) + Vector3.up * Random.Range(0.5f, 2.5f);
                 Vector3 vel = radial * Random.Range(2.5f, 8.0f) + Vector3.up * Random.Range(4.0f, 9.5f);
                 EmitMist(surfacePos + off, vel, Random.Range(6.5f, 14.0f), Random.Range(0.55f, 0.85f));
+            }
+
+            // 2b. Atmospheric 360-degree volumetric mist eruption for cutscene titan landing (soft, airy vapor clouds)
+            int volMistDropCount = 42;
+            for (int i = 0; i < volMistDropCount; i++)
+            {
+                float ang = Random.Range(0f, Mathf.PI * 2f);
+                Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                float r = Random.Range(0.8f, 18.0f);
+                Vector3 pos = surfacePos + radial * r + Vector3.up * Random.Range(0.3f, 3.2f);
+
+                float outSpd = Random.Range(6.0f, 16.0f);
+                float upSpd = Random.Range(4.0f, 12.0f);
+                Vector3 vel = radial * outSpd + Vector3.up * upSpd;
+
+                float pSize = Random.Range(9.0f, 16.0f);
+                float pAlpha = Random.Range(0.14f, 0.25f);
+                float pLife = Random.Range(4.0f, 6.5f);
+
+                EmitVolumetricMist(pos, vel, pSize, pAlpha, pLife);
             }
 
             // 3. Boiling frothing ocean foam ring (38 expanding foam patches)
@@ -863,7 +944,7 @@ namespace PacificRimWater
     /// <summary>Procedurally generated soft particle shapes (no hard square edges).</summary>
     internal static class SplashTextures
     {
-        private static Texture2D droplet, puff, foamPatch, bubble;
+        private static Texture2D droplet, puff, foamPatch, bubble, volumetricMistPuff;
 
         private static Texture2D Build(string texName, int size, System.Func<float, float, float, float> alphaFn)
         {
@@ -954,6 +1035,23 @@ namespace PacificRimWater
                 });
             }
             return bubble;
+        }
+
+        public static Texture2D VolumetricMistPuff()
+        {
+            if (volumetricMistPuff == null)
+            {
+                volumetricMistPuff = Build("SplashVolumetricMistPuff", 128, (u, v, r) =>
+                {
+                    float n = Mathf.PerlinNoise(u * 2.1f + 14.3f, v * 2.1f + 8.7f) * 0.5f
+                            + Mathf.PerlinNoise(u * 4.6f + 3.1f, v * 4.6f + 17.5f) * 0.35f
+                            + Mathf.PerlinNoise(u * 9.2f + 9.8f, v * 9.2f + 2.4f) * 0.15f;
+                    float radial = Smooth(1.0f, 0.08f, r);
+                    float core = Smooth(1.0f, 0.35f, r);
+                    return Mathf.Clamp01(n * 1.35f - 0.1f) * Mathf.Pow(radial, 1.4f) * core;
+                });
+            }
+            return volumetricMistPuff;
         }
     }
 }

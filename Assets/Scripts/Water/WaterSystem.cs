@@ -69,9 +69,9 @@ namespace PacificRimWater
         public float waveSetSpeed = 7f;
 
         [Header("Wave Height Limits")]
-        [Tooltip("Soft vertical ceiling for subtle dynamic footstep and leg wakes (meters).")]
-        [Range(0.05f, 1.5f)]
-        public float maxRippleHeight = 0.22f;
+        [Tooltip("Soft vertical ceiling for dynamic movement, footstep and impact wake ripples (meters).")]
+        [Range(0.05f, 4.5f)]
+        public float maxRippleHeight = 2.8f;
         [Tooltip("Soft vertical ceiling for total wave displacement above mean ocean level (meters).")]
         [Range(0.25f, 12.0f)]
         public float maxTotalWaveHeight = 6.60f;
@@ -107,14 +107,14 @@ namespace PacificRimWater
         public bool absorbEdges = true;
 
         [Tooltip("Radial expansion speed (m/s) of analytical wake rings.")]
-        public float wakeExpansionSpeed = 5.5f;
+        public float wakeExpansionSpeed = 7.0f;
         [Tooltip("Duration (seconds) before a wake ring fades completely.")]
-        public float wakeLifetime = 3.2f;
+        public float wakeLifetime = 4.2f;
 
         [Header("Simulation Follows Target")]
         public Transform followTarget;
 
-        private const int MAX_WAKES = 8;
+        private const int MAX_WAKES = 16;
         private readonly Vector4[] wakePositions = new Vector4[MAX_WAKES]; // xyz = worldPos, w = startTime
         private readonly Vector4[] wakeParams = new Vector4[MAX_WAKES];    // x = radius, y = strength, z = speed, w = invLifetime
         private int wakeCursor;
@@ -354,14 +354,14 @@ namespace PacificRimWater
         #region Public Wake Generation (8-Slot Ring Buffer)
 
         /// <summary>
-        /// Records a subtle, height-limited wake ripple into the GPU-evaluated 8-slot ring buffer.
+        /// Records a dynamic, propagating wake ripple into the GPU-evaluated 16-slot ring buffer.
         /// </summary>
         public void AddFootstepWave(Vector3 worldPosition, float radius, float strength)
         {
             if (!Application.isPlaying) return;
 
             float clampedStrength = Mathf.Clamp(strength, -maxRippleHeight, maxRippleHeight);
-            float clampedRadius = Mathf.Clamp(radius, 1.5f, 16f);
+            float clampedRadius = Mathf.Clamp(radius, 2.0f, 32f);
             float invLifetime = 1f / Mathf.Max(0.5f, wakeLifetime);
 
             wakePositions[wakeCursor] = new Vector4(worldPosition.x, transform.position.y, worldPosition.z, Time.time);
@@ -370,7 +370,7 @@ namespace PacificRimWater
         }
 
         /// <summary>
-        /// Emits a single subtle bow wake in front of a moving wading leg.
+        /// Emits a surging bow wake in front of a moving wading leg.
         /// </summary>
         public void AddWadingWake(Vector3 legPos, Vector3 legVelocity, float legWidth, float wakeStrength)
         {
@@ -378,8 +378,8 @@ namespace PacificRimWater
             if (horizVel.sqrMagnitude < 0.1f) return;
 
             Vector3 moveDir = horizVel.normalized;
-            float clampedStrength = Mathf.Clamp(wakeStrength, -0.12f, 0.12f);
-            AddFootstepWave(legPos + moveDir * (legWidth * 0.6f), legWidth * 1.4f, clampedStrength);
+            float clampedStrength = Mathf.Clamp(wakeStrength, -maxRippleHeight, maxRippleHeight);
+            AddFootstepWave(legPos + moveDir * (legWidth * 0.75f), legWidth * 2.2f, clampedStrength);
         }
 
         #endregion
@@ -400,7 +400,7 @@ namespace PacificRimWater
         }
 
         /// <summary>
-        /// Analytically evaluates the 8 active wake slots at world (X, Z).
+        /// Analytically evaluates the 16 active wake slots at world (X, Z).
         /// </summary>
         public float SampleRippleHeight(float worldX, float worldZ)
         {
@@ -426,13 +426,13 @@ namespace PacificRimWater
                 float dz = worldZ - posTime.z;
                 float dist = Mathf.Sqrt(dx * dx + dz * dz);
 
-                float radius = Mathf.Max(1.5f, p.x);
+                float radius = Mathf.Max(2.0f, p.x);
                 float waveFront = age * p.z;
-                float ringWidth = Mathf.Max(1.5f, radius * 0.45f);
+                float ringWidth = Mathf.Max(2.2f, radius * 0.45f);
                 float dRing = (dist - waveFront) / ringWidth;
 
-                float radialEnv = Mathf.Exp(-dRing * dRing) * Mathf.Exp(-dist / Mathf.Max(radius * 2.2f, 2f));
-                sum += Mathf.Cos(dRing * 2.4f) * radialEnv * timeDecay * p.y;
+                float radialEnv = Mathf.Exp(-dRing * dRing) * Mathf.Exp(-dist / Mathf.Max(radius * 3.0f, 8f));
+                sum += Mathf.Cos(dRing * 3.4f) * radialEnv * timeDecay * p.y;
             }
 
             return SoftLimit(sum, maxRippleHeight);

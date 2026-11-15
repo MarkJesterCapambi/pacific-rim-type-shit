@@ -15,7 +15,8 @@ namespace PacificRimEnvironment
         {
             ShippingContainer,
             MaritimeBuoy,
-            IndustrialWreckage
+            IndustrialWreckage,
+            CargoCrateCluster
         }
 
         public DebrisType debrisType = DebrisType.ShippingContainer;
@@ -144,6 +145,27 @@ namespace PacificRimEnvironment
                     plate.transform.localScale = new Vector3(8.5f, 0.8f, 9.5f);
                     plate.transform.localRotation = Quaternion.Euler(12f, 25f, -8f);
                     plate.GetComponent<Renderer>().sharedMaterial = mat;
+                    break;
+
+                case DebrisType.CargoCrateCluster:
+                    mat.color = tintColor != Color.white ? tintColor : new Color(0.48f, 0.36f, 0.24f, 1f);
+                    mat.SetFloat("_Metallic", 0.05f);
+                    mat.SetFloat("_Smoothness", 0.20f);
+
+                    GameObject crateA = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    crateA.name = "CargoCrate_Main";
+                    crateA.transform.SetParent(transform, false);
+                    crateA.transform.localPosition = Vector3.zero;
+                    crateA.transform.localScale = new Vector3(3.2f, 2.6f, 3.2f);
+                    crateA.GetComponent<Renderer>().sharedMaterial = mat;
+
+                    GameObject crateB = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    crateB.name = "CargoCrate_Side";
+                    crateB.transform.SetParent(transform, false);
+                    crateB.transform.localPosition = new Vector3(2.4f, -0.2f, 0.6f);
+                    crateB.transform.localRotation = Quaternion.Euler(0f, 18f, 0f);
+                    crateB.transform.localScale = new Vector3(2.2f, 2.0f, 2.2f);
+                    crateB.GetComponent<Renderer>().sharedMaterial = mat;
                     break;
             }
         }

@@ -858,11 +858,11 @@ namespace PacificRimWater.Editor
             waterInteraction.useAnimationSyncedFootsteps = true;
             waterInteraction.minFootstepInterval = 0.30f;
             waterInteraction.crossFootMinInterval = 0.18f;
-            waterInteraction.footstepWaveRadius = 8.0f;
-            waterInteraction.footstepWaveStrength = 0.18f;
+            waterInteraction.footstepWaveRadius = 18.0f;
+            waterInteraction.footstepWaveStrength = 2.4f;
             waterInteraction.strideDistance = 6.0f;
             waterInteraction.footSpacing = 2.4f;
-            waterInteraction.legWidth = 2.4f;
+            waterInteraction.legWidth = 2.8f;
             waterInteraction.spawnSplashes = true;
             waterInteraction.splashScale = 0.55f;
             waterInteraction.footstepShakeIntensity = 0.16f;
@@ -923,9 +923,11 @@ namespace PacificRimWater.Editor
             waterSystem.chopSpeed = 2.42f;
 
             waterSystem.waveSetBoost = 3.10f;
-            waterSystem.maxRippleHeight = 0.22f;
+            waterSystem.maxRippleHeight = 2.8f;
             waterSystem.maxTotalWaveHeight = 6.60f;
             waterSystem.maxTroughDepth = 2.25f;
+            waterSystem.wakeExpansionSpeed = 7.0f;
+            waterSystem.wakeLifetime = 4.2f;
 
             waterSystem.simResolution = 112;
             waterSystem.simAreaSize = 110f;
@@ -941,9 +943,9 @@ namespace PacificRimWater.Editor
             oceanRenderer.receiveShadows = true;
 
             var oceanMesh = oceanObj.AddComponent<OceanWaterMesh>();
-            oceanMesh.meshWidth = 360f;
-            oceanMesh.meshLength = 360f;
-            oceanMesh.resolution = 140;
+            oceanMesh.meshWidth = 480f;
+            oceanMesh.meshLength = 480f;
+            oceanMesh.resolution = 180;
             oceanMesh.foamHeightThreshold = 0.76f;
             oceanMesh.rippleFoamThreshold = 0.20f;
             oceanMesh.followTarget = jaeger.transform;

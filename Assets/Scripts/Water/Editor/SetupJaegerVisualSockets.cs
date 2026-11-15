@@ -83,13 +83,16 @@ namespace PacificRimWater.Editor
             {
                 Undo.SetTransformParent(torsoLightR, chestBone, "Reparent Torso Light Node R");
             }
-            if (rocketL != null && rocketL.parent != chestBone)
+            // Reparent rockets to Jaeger root so they have uniform scale (1,1,1) and follow chest in LateUpdate
+            if (rocketL != null && rocketL.parent != jaeger.transform)
             {
-                Undo.SetTransformParent(rocketL, chestBone, "Reparent Rocket Node L");
+                Undo.SetTransformParent(rocketL, jaeger.transform, "Reparent Rocket Node L");
+                rocketL.localScale = Vector3.one;
             }
-            if (rocketR != null && rocketR.parent != chestBone)
+            if (rocketR != null && rocketR.parent != jaeger.transform)
             {
-                Undo.SetTransformParent(rocketR, chestBone, "Reparent Rocket Node R");
+                Undo.SetTransformParent(rocketR, jaeger.transform, "Reparent Rocket Node R");
+                rocketR.localScale = Vector3.one;
             }
 
             // 4. Disable placeholder cube renderers on origins so they act purely as sockets
