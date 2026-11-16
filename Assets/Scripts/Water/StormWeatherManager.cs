@@ -46,6 +46,50 @@ namespace PacificRimWater
 
             PushWeatherGlobals();
             UpdateRainLensVisibility();
+            BoostThinRainVisibility();
+        }
+
+        private void BoostThinRainVisibility()
+        {
+            if (rainParticles == null) return;
+
+            var main = rainParticles.main;
+            main.loop = true;
+            main.cullingMode = ParticleSystemCullingMode.AlwaysSimulate;
+            main.prewarm = true;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.85f, 1.25f);
+            if (main.maxParticles < 20000)
+            {
+                main.maxParticles = 20000;
+            }
+            // Thin, atmospheric storm streaks that stay visible without obscuring combat
+            main.startSize = new ParticleSystem.MinMaxCurve(0.065f, 0.115f);
+            main.startColor = new Color(0.86f, 0.92f, 1.0f, 0.44f);
+
+            var emission = rainParticles.emission;
+            emission.enabled = true;
+            emission.rateOverTime = 4800f;
+
+            var shape = rainParticles.shape;
+            if (shape.enabled && shape.shapeType == ParticleSystemShapeType.Box)
+            {
+                shape.scale = new Vector3(150f, 150f, 22f);
+            }
+
+            var rend = rainParticles.GetComponent<ParticleSystemRenderer>();
+            if (rend != null)
+            {
+                rend.enableGPUInstancing = false;
+                rend.minParticleSize = 0.0012f;
+                rend.velocityScale = 0.055f;
+                rend.lengthScale = 5.5f;
+            }
+
+            if (Application.isPlaying)
+            {
+                rainParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                rainParticles.Play(true);
+            }
         }
 
         void OnDisable()
@@ -59,6 +103,11 @@ namespace PacificRimWater
             PushWeatherGlobals();
             UpdateFollowerPosition();
             UpdateRainLensVisibility();
+
+            if (Application.isPlaying && rainParticles != null && (rainParticles.isPaused || !rainParticles.isPlaying))
+            {
+                rainParticles.Play(true);
+            }
         }
 
         void LateUpdate()
@@ -85,11 +134,18 @@ namespace PacificRimWater
         {
             if (!Application.isPlaying) return;
 
-            Transform target = followTarget;
-            if (target == null && Camera.main != null)
+            Camera cam = Camera.main;
+            if (cam != null)
             {
-                target = Camera.main.transform;
+                // Center rain in front of the camera so foreground & mid-ground are densely drenched
+                Vector3 fwdFlat = new Vector3(cam.transform.forward.x, 0f, cam.transform.forward.z);
+                if (fwdFlat.sqrMagnitude > 0.001f) fwdFlat.Normalize();
+                Vector3 center = cam.transform.position + fwdFlat * 32f;
+                transform.position = new Vector3(center.x, 0f, center.z);
+                return;
             }
+
+            Transform target = followTarget;
             if (target == null) return;
 
             transform.position = new Vector3(target.position.x, 0f, target.position.z);

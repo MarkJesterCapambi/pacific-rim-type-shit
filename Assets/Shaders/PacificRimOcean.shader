@@ -16,6 +16,11 @@ Shader "PacificRim/OceanWater"
         _NormalTiling("Turbulence Tiling", Float) = 0.06
         _FoamMap("Foam Mask Texture", 2D) = "white" {}
         _FoamTiling("Foam Tiling", Float) = 0.12
+        _EdgeFadeStart("Horizon Edge Fade Start", Range(0.2, 0.96)) = 0.58
+        _EdgeFadeEnd("Horizon Edge Fade End", Range(0.3, 1.0)) = 0.98
+        _EdgeFogStrength("Volumetric Horizon Mist Strength", Range(0.0, 2.0)) = 1.0
+        _EdgeFogColor("Horizon Mist Color", Color) = (0.10, 0.14, 0.20, 1.0)
+        _EdgeMistNoiseScale("Horizon Mist Wisp Scale", Range(0.002, 0.08)) = 0.015
     }
 
     SubShader
@@ -66,6 +71,7 @@ Shader "PacificRim/OceanWater"
                 float  waveElevation : TEXCOORD2;
                 float  wakeFactor    : TEXCOORD3;
                 float  fogCoord      : TEXCOORD4;
+                float2 uv            : TEXCOORD5;
             };
 
             CBUFFER_START(UnityPerMaterial)
@@ -81,6 +87,11 @@ Shader "PacificRim/OceanWater"
                 float4 _SpecularColor;
                 float  _NormalTiling;
                 float  _FoamTiling;
+                float  _EdgeFadeStart;
+                float  _EdgeFadeEnd;
+                float  _EdgeFogStrength;
+                float4 _EdgeFogColor;
+                float  _EdgeMistNoiseScale;
             CBUFFER_END
 
             TEXTURE2D(_NormalMap);
@@ -414,15 +425,21 @@ Shader "PacificRim/OceanWater"
                 disp.xz = clamp(disp.xz, -horizCap, horizCap);
                 disp.y = softY;
 
+                // Gently flatten wave displacement at the very outer rim so horizon silhouettes never pop
+                float radialNorm = length((input.uv - 0.5) * 2.0);
+                float rimDamp = smoothstep(1.02, 0.84, radialNorm);
+                disp *= rimDamp;
+
                 float3 finalWorldPos = worldBase + disp;
                 float3 nrm = normalize(cross(binormalZ, tangentX));
 
                 output.positionWS = finalWorldPos;
                 output.normalWS = nrm;
                 output.positionCS = TransformWorldToHClip(finalWorldPos);
-                output.waveElevation = softY;
+                output.waveElevation = softY * rimDamp;
                 output.wakeFactor = saturate(wakeEnergy * 3.0);
                 output.fogCoord = ComputeFogFactor(output.positionCS.z);
+                output.uv = input.uv;
                 return output;
             }
 
@@ -642,7 +659,26 @@ Shader "PacificRim/OceanWater"
                 subtleFoam = saturate(subtleFoam + crestFoam + wakeFoam);
 
                 finalRgb = MixFog(finalRgb, input.fogCoord);
-                float finalAlpha = saturate(lerp(0.94, 0.99, fresnel + subtleFoam));
+
+                // Smooth radial horizon transparency + volumetric-style billowing mist at the ocean bounds
+                float radialNorm = length((input.uv - 0.5) * 2.0);
+                float edgeStart = min(_EdgeFadeStart, _EdgeFadeEnd - 0.02);
+                float edgeT = saturate((radialNorm - edgeStart) / max(0.001, _EdgeFadeEnd - edgeStart));
+                float edgeSmooth = edgeT * edgeT * edgeT * (edgeT * (edgeT * 6.0 - 15.0) + 10.0);
+
+                // Animated multi-layer mist wisps drifting across the outer ocean boundary
+                float2 mistUV1 = input.positionWS.xz * _EdgeMistNoiseScale + _GlobalWindVector.xy * (t * 0.022);
+                float2 mistUV2 = input.positionWS.xz * (_EdgeMistNoiseScale * 1.9) - _GlobalWindVector.xy * (t * 0.015) + float2(3.7, 1.9);
+                half mistNoise1 = SAMPLE_TEXTURE2D(_FoamMap, sampler_FoamMap, mistUV1).r;
+                half mistNoise2 = SAMPLE_TEXTURE2D(_FoamMap, sampler_FoamMap, mistUV2).r;
+                float mistWisps = saturate(mistNoise1 * 0.6 + mistNoise2 * 0.4);
+
+                float mistFactor = saturate(edgeSmooth * (0.65 + 0.55 * mistWisps) * _EdgeFogStrength);
+                half3 horizonMistColor = lerp(unity_FogColor.rgb, _EdgeFogColor.rgb, 0.55) + half3(0.35, 0.48, 0.68) * (_GlobalLightningFlash * 0.65);
+                finalRgb = lerp(finalRgb, horizonMistColor, mistFactor);
+
+                float edgeAlpha = 1.0 - edgeSmooth;
+                float finalAlpha = saturate(lerp(0.94, 0.99, fresnel + subtleFoam)) * edgeAlpha;
 
                 return half4(finalRgb, finalAlpha);
             }

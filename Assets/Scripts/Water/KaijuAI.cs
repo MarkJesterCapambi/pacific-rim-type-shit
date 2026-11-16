@@ -70,6 +70,12 @@ namespace PacificRimWater
         public float phase3HealAmount = 450f;
 
         [Header("Locomotion & Combat Ranges")]
+        [Tooltip("Allow Leatherback to sprint during normal combat/retreats. When false, he only sprints if the player runs too far away.")]
+        public bool canSprint = false;
+        [Tooltip("Distance (m) at which the player is considered fleeing to the far corners of the map, triggering pursuit sprint.")]
+        public float chaseSprintThreshold = 450f;
+        [Tooltip("Distance (m) at which pursuit sprint stops and Leatherback resumes his heavy walk.")]
+        public float chaseSprintStopDistance = 252f;
         [Tooltip("Leatherback walks slower after balance tuning to give Gipsy breathing room.")]
         public float walkSpeed = 7.0f;
         [Tooltip("Leatherback charge sprint speed.")]
@@ -383,7 +389,7 @@ namespace PacificRimWater
                 return;
             }
 
-            if (isCutsceneMode)
+            if (isCutsceneMode && attentionTurnTimer <= 0f)
             {
                 desiredVelocity = Vector3.zero;
                 SetLocomotionSpeed(0f);
@@ -464,9 +470,142 @@ namespace PacificRimWater
                 circleStrafeDir = -circleStrafeDir;
             }
 
+            if (attentionTurnTimer > 0f)
+            {
+                attentionTurnTimer -= dt;
+                float t = 1f - Mathf.Clamp01(attentionTurnTimer / Mathf.Max(0.01f, attentionTurnDuration));
+                float signedAngle = 0f;
+                float targetYaw = currentBodyYaw;
+                bool hasTarget = false;
+
+                if (attentionOverrideYaw.HasValue)
+                {
+                    targetYaw = attentionOverrideYaw.Value;
+                    Vector3 targetDir = Quaternion.Euler(0f, targetYaw, 0f) * Vector3.forward;
+                    signedAngle = Vector3.SignedAngle(transform.forward, targetDir, Vector3.up);
+                    hasTarget = true;
+                }
+                else if (targetJaeger != null)
+                {
+                    Vector3 toTarget = targetJaeger.transform.position - transform.position;
+                    toTarget.y = 0f;
+                    if (toTarget.sqrMagnitude > 0.01f)
+                    {
+                        Vector3 dirToTarget = toTarget.normalized;
+                        targetYaw = Mathf.Atan2(dirToTarget.x, dirToTarget.z) * Mathf.Rad2Deg;
+                        signedAngle = Vector3.SignedAngle(transform.forward, dirToTarget, Vector3.up);
+                        hasTarget = true;
+                    }
+                }
+
+                if (hasTarget)
+                {
+                    if (Mathf.Abs(signedAngle) > 165f)
+                    {
+                        signedAngle = Mathf.Abs(signedAngle) * attentionTurnSign;
+                    }
+
+                    // Delay root body rotation for the first ~0.45s (t <= 0.14) so head & upper torso turn over the shoulder first
+                    if (t > 0.14f)
+                    {
+                        float easedSpeed = turnSpeed * 0.62f * Mathf.Sin(Mathf.Clamp01((t - 0.14f) / 0.86f) * Mathf.PI);
+                        float step = Mathf.Min(Mathf.Abs(signedAngle), Mathf.Max(0f, easedSpeed) * dt);
+                        currentBodyYaw = Mathf.Repeat(currentBodyYaw + Mathf.Sign(signedAngle) * step, 360f);
+                        transform.rotation = Quaternion.Euler(0f, currentBodyYaw, 0f);
+                    }
+                }
+
+                if (attentionTurnTimer <= 0f)
+                {
+                    attentionOverrideYaw = null;
+                }
+
+                desiredVelocity = Vector3.zero;
+                if (t > 0.14f && Mathf.Abs(signedAngle) > 10f)
+                {
+                    SetLocomotionSpeed(0.55f);
+                    CrossFadeState("Walk", 0.22f);
+                }
+                else
+                {
+                    SetLocomotionSpeed(1f);
+                    CrossFadeState("Idle", 0.25f);
+                }
+
+                UpdateAnimatorPlaybackSpeed();
+                TrackFootsteps();
+                return;
+            }
+
             UpdateAnimatorPlaybackSpeed();
             UpdateStateMachine(dt);
             TrackFootsteps();
+        }
+
+        private float attentionTurnTimer = 0f;
+        private float attentionTurnDuration = 2.6f;
+        private float? attentionOverrideYaw = null;
+        private float attentionTurnSign = 1f;
+        private bool isPursuitSprinting = false;
+        public bool IsAttentionTurning => attentionTurnTimer > 0f;
+
+        public void SetCutscenePose(float yawDegrees)
+        {
+            isCutsceneMode = true;
+            attentionTurnTimer = 0f;
+            attentionOverrideYaw = null;
+            desiredVelocity = Vector3.zero;
+            currentBodyYaw = yawDegrees;
+            bodyYawInitialized = true;
+            currentTorsoYaw = 0f;
+            currentNeckYaw = 0f;
+            currentStrafeYaw = 0f;
+            currentStrafeWeight = 0f;
+            Quaternion rot = Quaternion.Euler(0f, yawDegrees, 0f);
+            transform.rotation = rot;
+            if (rb != null)
+            {
+                rb.rotation = rot;
+                rb.MoveRotation(rot);
+            }
+        }
+
+        /// <summary>
+        /// Temporarily animates Leatherback using procedural IK (head/neck lead, upper torso follow,
+        /// and 2-bone leg pivot) to slowly turn his attention toward Gipsy (or an explicit yaw like 180)
+        /// after the foghorn sounds.
+        /// </summary>
+        public void TriggerFoghornAttentionTurn(float duration = 2.6f, float? overrideTargetYaw = null)
+        {
+            if (IsDead) return;
+            attentionTurnDuration = Mathf.Max(0.5f, duration);
+            attentionTurnTimer = attentionTurnDuration;
+            attentionOverrideYaw = overrideTargetYaw;
+            currentBodyYaw = transform.eulerAngles.y;
+
+            Vector3 targetDir = Vector3.zero;
+            if (overrideTargetYaw.HasValue)
+            {
+                targetDir = Quaternion.Euler(0f, overrideTargetYaw.Value, 0f) * Vector3.forward;
+            }
+            else if (targetJaeger != null)
+            {
+                Vector3 toTarget = targetJaeger.transform.position - transform.position;
+                toTarget.y = 0f;
+                if (toTarget.sqrMagnitude > 0.01f) targetDir = toTarget.normalized;
+            }
+
+            if (targetDir.sqrMagnitude > 0.01f)
+            {
+                float initialSigned = Vector3.SignedAngle(transform.forward, targetDir, Vector3.up);
+                attentionTurnSign = Mathf.Abs(initialSigned) > 165f ? 1f : (initialSigned >= 0f ? 1f : -1f);
+            }
+            else
+            {
+                attentionTurnSign = 1f;
+            }
+
+            desiredVelocity = Vector3.zero;
         }
 
         private void UpdateAnimatorPlaybackSpeed()
@@ -551,27 +690,54 @@ namespace PacificRimWater
             float dt = Time.deltaTime;
             if (dt <= 0.0001f) return;
 
-            bool isLocoState = currentState == AIState.ChasingAndStrafing ||
+            bool isAttentionTurn = IsAttentionTurning;
+            bool isLocoState = !isCutsceneMode && (currentState == AIState.ChasingAndStrafing ||
                                currentState == AIState.SizingUp ||
-                               currentState == AIState.Retreating;
+                               currentState == AIState.Retreating);
 
             // 1. Upper-torso & head tracking toward Gipsy
             float targetTorsoYaw = 0f;
             float targetNeckYaw = 0f;
-            if (targetJaeger != null && (isLocoState || currentState == AIState.Blocking))
+            float attentionSignedAngle = 0f;
+            if (targetJaeger != null && (isLocoState || currentState == AIState.Blocking || isAttentionTurn))
             {
-                Vector3 toTarget = targetJaeger.transform.position - transform.position;
-                toTarget.y = 0f;
-                if (toTarget.sqrMagnitude > 0.01f)
+                Vector3 lookDir = Vector3.zero;
+                if (isAttentionTurn && attentionOverrideYaw.HasValue)
                 {
-                    float signedAngle = Vector3.SignedAngle(transform.forward, toTarget.normalized, Vector3.up);
-                    targetTorsoYaw = Mathf.Clamp(signedAngle * 0.45f, -maxTorsoLookYaw, maxTorsoLookYaw);
-                    targetNeckYaw = Mathf.Clamp(signedAngle * 0.60f, -maxTorsoLookYaw * 1.2f, maxTorsoLookYaw * 1.2f);
+                    lookDir = Quaternion.Euler(0f, attentionOverrideYaw.Value, 0f) * Vector3.forward;
+                }
+                else
+                {
+                    Vector3 toTarget = targetJaeger.transform.position - transform.position;
+                    toTarget.y = 0f;
+                    if (toTarget.sqrMagnitude > 0.01f) lookDir = toTarget.normalized;
+                }
+
+                if (lookDir.sqrMagnitude > 0.01f)
+                {
+                    float signedAngle = Vector3.SignedAngle(transform.forward, lookDir, Vector3.up);
+                    if (isAttentionTurn && Mathf.Abs(signedAngle) > 165f)
+                    {
+                        signedAngle = Mathf.Abs(signedAngle) * attentionTurnSign;
+                    }
+                    attentionSignedAngle = signedAngle;
+                    if (isAttentionTurn)
+                    {
+                        float t = 1f - Mathf.Clamp01(attentionTurnTimer / Mathf.Max(0.01f, attentionTurnDuration));
+                        float attentionBlend = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t * 3.0f));
+                        targetNeckYaw = Mathf.Clamp(signedAngle * 0.78f, -maxTorsoLookYaw * 1.85f, maxTorsoLookYaw * 1.85f) * attentionBlend;
+                        targetTorsoYaw = Mathf.Clamp(signedAngle * 0.55f, -maxTorsoLookYaw * 1.30f, maxTorsoLookYaw * 1.30f) * attentionBlend;
+                    }
+                    else
+                    {
+                        targetTorsoYaw = Mathf.Clamp(signedAngle * 0.45f, -maxTorsoLookYaw, maxTorsoLookYaw);
+                        targetNeckYaw = Mathf.Clamp(signedAngle * 0.60f, -maxTorsoLookYaw * 1.2f, maxTorsoLookYaw * 1.2f);
+                    }
                 }
             }
 
-            currentTorsoYaw = Mathf.MoveTowards(currentTorsoYaw, targetTorsoYaw, 100f * dt);
-            currentNeckYaw = Mathf.MoveTowards(currentNeckYaw, targetNeckYaw, 150f * dt);
+            currentTorsoYaw = Mathf.MoveTowards(currentTorsoYaw, targetTorsoYaw, (isAttentionTurn ? 65f : 100f) * dt);
+            currentNeckYaw = Mathf.MoveTowards(currentNeckYaw, targetNeckYaw, (isAttentionTurn ? 95f : 150f) * dt);
 
             if (Mathf.Abs(currentTorsoYaw) > 0.05f && upperTorsoBone != null)
             {
@@ -587,7 +753,13 @@ namespace PacificRimWater
             float desiredStrafeYaw = 0f;
             float desiredStrafeDir = 0f;
 
-            if (isLocoState && desiredVelocity.sqrMagnitude > 0.5f)
+            if (isAttentionTurn && Mathf.Abs(attentionSignedAngle) > 6f)
+            {
+                desiredStrafeWeight = Mathf.Clamp01(Mathf.Abs(attentionSignedAngle) / 45f) * 0.65f;
+                desiredStrafeYaw = Mathf.Clamp(attentionSignedAngle * 0.45f, -maxStrafePelvisYaw, maxStrafePelvisYaw);
+                desiredStrafeDir = Mathf.Sign(attentionSignedAngle) * 0.5f;
+            }
+            else if (isLocoState && desiredVelocity.sqrMagnitude > 0.5f)
             {
                 Vector3 flatVel = new Vector3(desiredVelocity.x, 0f, desiredVelocity.z);
                 float latSpeed = Vector3.Dot(flatVel, transform.right);
@@ -711,6 +883,7 @@ namespace PacificRimWater
             switch (currentState)
             {
                 case AIState.Idle:
+                    isPursuitSprinting = false;
                     desiredVelocity = Vector3.zero;
                     SetLocomotionSpeed(1f);
                     CrossFadeState("Idle", 0.2f);
@@ -762,9 +935,18 @@ namespace PacificRimWater
                         break;
                     }
 
+                    if (dist >= chaseSprintThreshold)
+                    {
+                        isPursuitSprinting = true;
+                    }
+                    else if (dist <= chaseSprintStopDistance)
+                    {
+                        isPursuitSprinting = false;
+                    }
+
                     if (dist > meleeAttackRange)
                     {
-                        bool shouldSprint = dist > sprintMinRange && (IsEmpBuffed || dist > 36f);
+                        bool shouldSprint = isPursuitSprinting || (canSprint && dist > sprintMinRange && (IsEmpBuffed || dist > 36f));
                         if (shouldSprint)
                         {
                             float spd = IsEmpBuffed ? empSprintSpeed : sprintSpeed;
@@ -898,7 +1080,7 @@ namespace PacificRimWater
                         break;
                     }
 
-                    RotateYawToward(targetYaw, activePattern == AttackPattern.SprintChargeSlam ? turnSpeed : attackTurnSpeed, dt);
+                    // Orientation stays locked during attacks so sideways dashes evade instead of getting tracked
                     if (activePattern != AttackPattern.SprintChargeSlam)
                     {
                         float lungeSpeed = (dist > minCombatDistance + 0.6f) ? walkSpeed * 0.32f : 0f;
@@ -1006,9 +1188,9 @@ namespace PacificRimWater
         {
             CancelActiveSequence();
             currentState = AIState.Retreating;
-            retreatWithSprint = useSprint;
+            retreatWithSprint = canSprint && useSprint;
             stateTimer = duration;
-            retreatTargetDist = useSprint ? Random.Range(28f, 35f) : Random.Range(24f, 29f);
+            retreatTargetDist = retreatWithSprint ? Random.Range(28f, 35f) : Random.Range(24f, 29f);
         }
 
         public void TriggerVictoryRoar()
@@ -1097,15 +1279,15 @@ namespace PacificRimWater
 
         private IEnumerator PhaseTransitionRoutine(int phase)
         {
-            // Phase disengage: rapid backward sprint to reset range
-            retreatWithSprint = true;
-            SetLocomotionSpeed(-1.22f);
-            CrossFadeState("Run", 0.12f, true);
+            // Phase disengage: rapid backward disengage to reset range
+            retreatWithSprint = canSprint;
+            SetLocomotionSpeed(canSprint ? -1.22f : -1.05f);
+            CrossFadeState(canSprint ? "Run" : "Walk", 0.12f, true);
 
             float backElapsed = 0f;
             while (backElapsed < 0.95f && currentState == AIState.PhaseTransition)
             {
-                desiredVelocity = -transform.forward * (backwardSprintSpeed * 1.1f);
+                desiredVelocity = -transform.forward * (canSprint ? backwardSprintSpeed * 1.1f : backwardWalkSpeed * 1.15f);
                 backElapsed += Time.deltaTime;
                 yield return null;
             }
@@ -1133,7 +1315,7 @@ namespace PacificRimWater
             hasHyperArmor = false;
             if (phase >= 2)
             {
-                StartAttackPattern(AttackPattern.SprintChargeSlam);
+                StartAttackPattern(canSprint ? AttackPattern.SprintChargeSlam : AttackPattern.HeavySlam);
             }
             else
             {
@@ -1337,15 +1519,15 @@ namespace PacificRimWater
                     break;
 
                 case AttackPattern.SprintChargeSlam:
-                    SetLocomotionSpeed(IsEmpBuffed ? 1.15f : 1.05f);
-                    CrossFadeState("Run", 0.14f, true);
+                    SetLocomotionSpeed(canSprint ? (IsEmpBuffed ? 1.15f : 1.05f) : 1.0f);
+                    CrossFadeState(canSprint ? "Run" : "Walk", 0.14f, true);
                     float chargeElapsed = 0f;
                     while (chargeElapsed < 1.6f && currentState == AIState.Attacking && targetJaeger != null)
                     {
                         float d = Vector3.Distance(
                             new Vector3(transform.position.x, 0f, transform.position.z),
                             new Vector3(targetJaeger.transform.position.x, 0f, targetJaeger.transform.position.z));
-                        desiredVelocity = transform.forward * (IsEmpBuffed ? empSprintSpeed : sprintSpeed);
+                        desiredVelocity = transform.forward * (canSprint ? (IsEmpBuffed ? empSprintSpeed : sprintSpeed) : (IsEmpBuffed ? empWalkSpeed : walkSpeed));
                         if (d <= 22.5f) break;
                         chargeElapsed += Time.deltaTime;
                         yield return null;
@@ -1419,7 +1601,7 @@ namespace PacificRimWater
             float rootDist = flatToJaeger.magnitude;
             float fwdDot = rootDist > 0.01f ? Vector3.Dot(transform.forward, flatToJaeger / rootDist) : 1f;
 
-            bool inStrikeZone = (handDist <= strikeRadius || rootDist <= meleeAttackRange + (isHeavy ? 2.5f : 1.5f)) && fwdDot >= 0.35f;
+            bool inStrikeZone = (handDist <= strikeRadius || rootDist <= meleeAttackRange - 1.0f) && fwdDot >= 0.68f;
             if (inStrikeZone)
             {
                 Vector3 kbDir = rootDist > 0.01f ? (flatToJaeger / rootDist) : transform.forward;
@@ -1442,6 +1624,7 @@ namespace PacificRimWater
 
         private void TriggerStagger(string staggerState, float duration)
         {
+            isPursuitSprinting = false;
             CancelActiveSequence();
             currentState = AIState.Staggered;
             stateTimer = duration;

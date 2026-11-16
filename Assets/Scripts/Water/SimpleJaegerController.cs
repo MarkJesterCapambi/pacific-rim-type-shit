@@ -139,6 +139,22 @@ namespace PacificRimWater
         public KeyCode stompKey = KeyCode.Space;
         public float stompCooldown = 1.2f;
 
+        [Header("Guard, Chainswords, Plasma Caster & Thruster Sidestep")]
+        public KeyCode blockKey = KeyCode.F;
+        public KeyCode chainswordKey = KeyCode.R;
+        public KeyCode plasmaCasterKey = KeyCode.T;
+        public float chainswordDamageMultiplier = 1.35f;
+        public float chainswordExtraRange = 4.0f;
+        public float plasmaDamage = 115f;
+        public float plasmaCooldown = 2.4f;
+        public float plasmaStaminaCost = 24f;
+        public float plasmaBoltSpeed = 120f;
+        public float doubleTapWindow = 0.26f;
+        public float dashSpeed = 42f;
+        public float dashDuration = 0.34f;
+        public float dashCooldown = 1.15f;
+        public float dashStaminaCost = 20f;
+
         private const float LightPunchClipLength = 0.967f;
         private const float EmoteClipLength = 7.334f; // 3.667s clip slowed by 0.5x = 7.334s
 
@@ -164,6 +180,10 @@ namespace PacificRimWater
 
         private Transform handL;
         private Transform handR;
+        private Transform forearmL;
+        private Transform upperArmL;
+        private Transform forearmR;
+        private Transform upperArmR;
         private Transform hips;
         private Transform spine1;
         private Transform chest;
@@ -173,6 +193,45 @@ namespace PacificRimWater
         private Transform thighR;
         private Transform shinR;
         private Transform footR;
+
+        // Chainswords, Plasma Caster & Double-Tap Thruster Dash runtime state
+        private bool areChainswordsActive = false;
+        private GameObject chainswordBladeL;
+        private GameObject chainswordBladeR;
+        private Vector3 swordDeployedPosL;
+        private Vector3 swordDeployedPosR;
+        private Quaternion swordDeployedRotL;
+        private Quaternion swordDeployedRotR;
+        private Vector3 swordDeployedScaleL;
+        private Vector3 swordDeployedScaleR;
+        private Coroutine activeChainswordAnimCoroutine;
+        private float chainswordDeployAnimStartTime = -10f;
+        private float chainswordDeployAnimEndTime = -10f;
+        private bool chainswordDeployIsOpening = false;
+        private float lastPlasmaTime = -10f;
+        private float plasmaAimStartTime = -10f;
+        private float plasmaAimEndTime = -10f;
+        private float plasmaFireTime = -10f;
+        private Vector3 plasmaTargetPos;
+        private float lastDashTime = -10f;
+        private float dashEndTime = -10f;
+        private Vector2 dashLocalDir = Vector2.zero;
+        private Vector3 dashWorldDir = Vector3.forward;
+        private float dashStartTime = -10f;
+
+        // Smoothed procedural IK blend weights (prevent popping when abilities start/stop/interrupt)
+        private float plasmaIKWeight = 0f;
+        private float dashIKWeight = 0f;
+        private float plasmaRecoilKick = 0f;
+        private float lastTapW = -10f;
+        private float lastTapS = -10f;
+        private float lastTapA = -10f;
+        private float lastTapD = -10f;
+
+        public bool AreChainswordsActive => areChainswordsActive;
+        public bool IsChainswordDeploying => Time.time < chainswordDeployAnimEndTime;
+        public bool IsPlasmaAiming => Time.time < plasmaAimEndTime;
+        public bool IsDashing => Time.time < dashEndTime;
 
         private float lastHorizontalInput = 0f;
         private float lastVerticalInput = 0f;
@@ -227,6 +286,10 @@ namespace PacificRimWater
             cachedKaiju = FindAnyObjectByType<KaijuAI>();
             visualSockets = GetComponent<JaegerVisualSockets>() ?? GetComponentInChildren<JaegerVisualSockets>();
             ResolveRigTransforms();
+            areChainswordsActive = false;
+            EnsureChainswordVisuals();
+            if (chainswordBladeL != null) chainswordBladeL.SetActive(false);
+            if (chainswordBladeR != null) chainswordBladeR.SetActive(false);
         }
 
         private void OnDestroy()
@@ -238,6 +301,16 @@ namespace PacificRimWater
         {
             if (handL == null) handL = FindChildRecursive(transform, "Hand.L");
             if (handR == null) handR = FindChildRecursive(transform, "Hand.R");
+            if (handL != null)
+            {
+                if (forearmL == null) forearmL = handL.parent;
+                if (upperArmL == null && forearmL != null) upperArmL = forearmL.parent;
+            }
+            if (handR != null)
+            {
+                if (forearmR == null) forearmR = handR.parent;
+                if (upperArmR == null && forearmR != null) upperArmR = forearmR.parent;
+            }
         }
 
         private void ResolveRigTransforms()
@@ -304,6 +377,9 @@ namespace PacificRimWater
             bool shiftHeld = false;
             bool blockHeld = false;
             bool emoteTriggered = false;
+            bool chainswordTriggered = false;
+            bool plasmaTriggered = false;
+            bool tapW = false, tapS = false, tapA = false, tapD = false;
 
             // 1. Try reading via Legacy Input Manager
             try
@@ -313,8 +389,14 @@ namespace PacificRimWater
                 stompTriggered = Input.GetKeyDown(stompKey);
                 punchTriggered = Input.GetMouseButtonDown(0);
                 heavyAttackTriggered = Input.GetMouseButtonDown(1);
-                blockHeld = Input.GetKey(KeyCode.F);
+                blockHeld = Input.GetKey(blockKey);
                 emoteTriggered = Input.GetKeyDown(KeyCode.Q);
+                chainswordTriggered = Input.GetKeyDown(chainswordKey);
+                plasmaTriggered = Input.GetKeyDown(plasmaCasterKey);
+                tapW = Input.GetKeyDown(KeyCode.W);
+                tapS = Input.GetKeyDown(KeyCode.S);
+                tapA = Input.GetKeyDown(KeyCode.A);
+                tapD = Input.GetKeyDown(KeyCode.D);
                 shiftPressedThisFrame = Input.GetKeyDown(KeyCode.LeftShift) || Input.GetKeyDown(KeyCode.RightShift);
                 shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
             }
@@ -350,7 +432,7 @@ namespace PacificRimWater
                 {
                     stompTriggered = true;
                 }
-                if (kb.fKey.isPressed)
+                if (!blockHeld && kb[GetInputSystemKey(blockKey)].isPressed)
                 {
                     blockHeld = true;
                 }
@@ -358,6 +440,18 @@ namespace PacificRimWater
                 {
                     emoteTriggered = true;
                 }
+                if (!chainswordTriggered && kb[GetInputSystemKey(chainswordKey)].wasPressedThisFrame)
+                {
+                    chainswordTriggered = true;
+                }
+                if (!plasmaTriggered && kb[GetInputSystemKey(plasmaCasterKey)].wasPressedThisFrame)
+                {
+                    plasmaTriggered = true;
+                }
+                if (!tapW && kb.wKey.wasPressedThisFrame) tapW = true;
+                if (!tapS && kb.sKey.wasPressedThisFrame) tapS = true;
+                if (!tapA && kb.aKey.wasPressedThisFrame) tapA = true;
+                if (!tapD && kb.dKey.wasPressedThisFrame) tapD = true;
             }
 
             if (UnityEngine.InputSystem.Mouse.current != null)
@@ -389,6 +483,21 @@ namespace PacificRimWater
             {
                 PerformEmote();
             }
+
+            // Chainswords toggle (R)
+            if (chainswordTriggered && !IsEmoting)
+            {
+                ToggleChainswords();
+            }
+
+            // Plasma Caster fire (F)
+            if (plasmaTriggered && !IsEmoting && !IsExhausted && !IsPlasmaAiming && Time.time >= lastPlasmaTime + plasmaCooldown)
+            {
+                TriggerPlasmaCaster();
+            }
+
+            // Double-tap WASD Thruster Sidestep / Dash
+            CheckDoubleTapDash(tapW, tapS, tapA, tapD);
 
             bool isEmotingNow = IsEmoting;
 
@@ -677,6 +786,32 @@ namespace PacificRimWater
             // Forward leaping momentum carries the heavy 2,000-ton Jaeger through the air,
             // decaying naturally under heavy mech inertia and ocean drag.
             // Player directional input CANNOT abruptly stop or cancel this colossal forward leap momentum midair!
+            if (IsDashing && !IsDead)
+            {
+                // Thruster burst: ease-out speed profile applied directly (bypasses heavy-mech accel smoothing)
+                float t = Mathf.Clamp01((Time.time - dashStartTime) / Mathf.Max(0.01f, dashDuration));
+                float speedCurve = 1f - (t * t);
+                // Compensate for ocean wading drag so the burst actually carries the mech
+#if UNITY_6000_0_OR_NEWER
+                float dragComp = 1f + (rb.linearDamping * Time.fixedDeltaTime);
+#else
+                float dragComp = 1f + (rb.drag * Time.fixedDeltaTime);
+#endif
+                Vector3 dashVel = dashWorldDir * (dashSpeed * Mathf.Lerp(0.35f, 1f, speedCurve) * dragComp);
+#if UNITY_6000_0_OR_NEWER
+                Vector3 vNow = rb.linearVelocity;
+                rb.linearVelocity = new Vector3(dashVel.x, vNow.y, dashVel.z);
+#else
+                Vector3 vNow = rb.velocity;
+                rb.velocity = new Vector3(dashVel.x, vNow.y, dashVel.z);
+#endif
+                if (bodyYawInitialized && rb != null)
+                {
+                    rb.MoveRotation(Quaternion.Euler(0f, currentBodyYaw, 0f));
+                }
+                return;
+            }
+
             if (IsSprintAttacking)
             {
                 targetVelocity = lungeVelocity;
@@ -751,11 +886,75 @@ namespace PacificRimWater
                 }
             }
 
-            if (currentStrafeWeight > 0.001f)
+            // Smoothed dash blend weight (fast attack, softer release so the mech settles out of the burst)
+            dashIKWeight = Mathf.MoveTowards(dashIKWeight, IsDashing ? 1f : 0f, (IsDashing ? 9f : 3.5f) * dt);
+
+            if (dashIKWeight > 0.001f)
+            {
+                ApplyDashBraceIK(dt);
+            }
+            else if (currentStrafeWeight > 0.001f)
             {
                 ApplyStrafeLegIK(thighL, shinL, footL, -1f);
                 ApplyStrafeLegIK(thighR, shinR, footR, 1f);
             }
+
+            ApplyCombatArmsIK(dt);
+        }
+
+        /// <summary>
+        /// Thruster dash pose: capture planted feet, crouch + lean the pelvis into the burst direction
+        /// (rockets push from the back), keep the upper torso braced, then re-solve both legs so the
+        /// leading leg reaches out and the trailing leg extends behind like it's pushing off the seabed.
+        /// </summary>
+        private void ApplyDashBraceIK(float dt)
+        {
+            if (hips == null || thighL == null || shinL == null || footL == null || thighR == null || shinR == null || footR == null) return;
+
+            float w = Mathf.SmoothStep(0f, 1f, dashIKWeight);
+            float progress = IsDashing ? Mathf.Clamp01((Time.time - dashStartTime) / Mathf.Max(0.01f, dashDuration)) : 1f;
+            float stepArc = Mathf.Sin(progress * Mathf.PI);
+
+            // Burst direction in world, flattened
+            Vector3 dir = new Vector3(dashWorldDir.x, 0f, dashWorldDir.z);
+            if (dir.sqrMagnitude < 0.001f) dir = transform.forward;
+            dir.Normalize();
+
+            float legLen = Vector3.Distance(thighL.position, shinL.position) + Vector3.Distance(shinL.position, footL.position);
+
+            // 1. Capture animated (planted) foot positions BEFORE moving the pelvis
+            Vector3 footPosL = footL.position;
+            Vector3 footPosR = footR.position;
+
+            // 2. Pelvis: crouch down and lean into the burst
+            Vector3 leanAxis = Vector3.Cross(Vector3.up, dir);
+            float leanAngle = 13f * w;
+            hips.position += Vector3.down * (legLen * 0.10f * w);
+            hips.rotation = Quaternion.AngleAxis(leanAngle, leanAxis) * hips.rotation;
+
+            // 3. Brace upper body: counter-rotate part of the lean so the head/visor stays steady on target
+            if (spine1 != null) spine1.rotation = Quaternion.AngleAxis(-leanAngle * 0.35f, leanAxis) * spine1.rotation;
+            if (chest != null) chest.rotation = Quaternion.AngleAxis(-leanAngle * 0.25f, leanAxis) * chest.rotation;
+
+            // 4. Leading vs trailing leg (side dashes lead with the dash-side leg; fwd/back lead with right)
+            float lateral = Vector3.Dot(dir, transform.right);
+            bool leftLeads = lateral < -0.3f;
+
+            float reach = legLen * 0.22f * w;
+            float lift = legLen * 0.10f * w * stepArc;
+
+            Vector3 leadOffset = dir * reach + Vector3.up * lift;
+            Vector3 trailOffset = -dir * (reach * 0.85f);
+
+            Vector3 targetL = footPosL + (leftLeads ? leadOffset : trailOffset);
+            Vector3 targetR = footPosR + (leftLeads ? trailOffset : leadOffset);
+
+            // Knees point along the body forward, slightly splayed outward
+            Vector3 poleL = (transform.forward - transform.right * 0.2f).normalized;
+            Vector3 poleR = (transform.forward + transform.right * 0.2f).normalized;
+
+            SolveTwoBoneIKWorld(thighL, shinL, footL, targetL, poleL);
+            SolveTwoBoneIKWorld(thighR, shinR, footR, targetR, poleR);
         }
 
         private void ApplyStrafeLegIK(Transform thigh, Transform shin, Transform foot, float sideSign)
@@ -780,12 +979,13 @@ namespace PacificRimWater
         /// 2-bone analytical world-space delta IK solver using the Law of Cosines on top of the current animated pose.
         /// Preserves Blender bone local roll orientations while accurately placing the foot at targetPos.
         /// </summary>
-        private static void SolveTwoBoneIKWorld(Transform root, Transform mid, Transform tip, Vector3 targetPos, Vector3 poleForward)
+        private static void SolveTwoBoneIKWorld(Transform root, Transform mid, Transform tip, Vector3 targetPos, Vector3 poleForward, bool keepTipLocalRotation = false)
         {
             Vector3 a = root.position;
             Vector3 b = mid.position;
             Vector3 c = tip.position;
             Quaternion origTipRot = tip.rotation;
+            Quaternion origTipLocalRot = tip.localRotation;
 
             float l1 = Vector3.Distance(a, b);
             float l2 = Vector3.Distance(b, c);
@@ -833,7 +1033,8 @@ namespace PacificRimWater
                 mid.rotation = Quaternion.FromToRotation(curMidToTip, newMidToTip) * mid.rotation;
             }
 
-            tip.rotation = origTipRot;
+            if (keepTipLocalRotation) tip.localRotation = origTipLocalRot;
+            else tip.rotation = origTipRot;
         }
 
         private void PerformStomp()
@@ -1000,10 +1201,12 @@ namespace PacificRimWater
 
             // Calibrated time until fist actually reaches full extension and lands on target
             float currentPunchDamage = IsPoweredUp ? (punchDamage * 1.25f) : punchDamage;
+            if (areChainswordsActive) currentPunchDamage *= chainswordDamageMultiplier;
+            float currentPunchRange = areChainswordsActive ? (punchRange + chainswordExtraRange) : punchRange;
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayAttackWhoosh(transform.position + transform.forward * 4f + Vector3.up * 14f, isHeavy: false);
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayHydraulicServo(transform.position + Vector3.up * 12f, 0.5f);
             if (activeDelayedStrikeCoroutine != null) StopCoroutine(activeDelayedStrikeCoroutine);
-            activeDelayedStrikeCoroutine = StartCoroutine(ExecuteDelayedStrike(punchNumber, currentPunchDamage, punchRange, landTime / animSpeed, isHeavy: false));
+            activeDelayedStrikeCoroutine = StartCoroutine(ExecuteDelayedStrike(punchNumber, currentPunchDamage, currentPunchRange, landTime / animSpeed, isHeavy: false));
 
             Debug.Log($"<color=#00e5ff><b>[Jaeger]</b></color> Punch {punchNumber} initiated! (cycle [{punchCycleOrder[0]}-{punchCycleOrder[1]}-{punchCycleOrder[2]}], step {stepInCycle}/3, fist impact in {landTime / animSpeed:F2}s, combo ready in {landTime / animSpeed:F2}s)");
         }
@@ -1057,8 +1260,10 @@ namespace PacificRimWater
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayAttackWhoosh(transform.position + transform.forward * 5f + Vector3.up * 15f, isHeavy: true);
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayHydraulicServo(transform.position + Vector3.up * 12f, 0.75f);
             float currentHeavyDamage = IsPoweredUp ? (heavyAttackDamage * 1.25f) : heavyAttackDamage;
+            if (areChainswordsActive) currentHeavyDamage *= chainswordDamageMultiplier;
+            float currentHeavyRange = areChainswordsActive ? (heavyAttackRange + chainswordExtraRange) : heavyAttackRange;
             if (activeDelayedStrikeCoroutine != null) StopCoroutine(activeDelayedStrikeCoroutine);
-            activeDelayedStrikeCoroutine = StartCoroutine(ExecuteDelayedStrike(variant, currentHeavyDamage, heavyAttackRange, landTime / animSpeed, isHeavy: true));
+            activeDelayedStrikeCoroutine = StartCoroutine(ExecuteDelayedStrike(variant, currentHeavyDamage, currentHeavyRange, landTime / animSpeed, isHeavy: true));
 
             Debug.Log($"<color=#ffaa00><b>[Jaeger]</b></color> {(runningAttack ? "Running Heavy Attack (Uninterruptible)" : "Heavy Attack")} initiated! (fist impact in {landTime / animSpeed:F2}s)");
         }
@@ -1184,6 +1389,11 @@ namespace PacificRimWater
         public void TakeDamage(float amount, Vector3 knockback, bool isHeavy = false, Vector3 hitPoint = default)
         {
             if (IsDead) return;
+            if (IsDashing)
+            {
+                Debug.Log("<color=#00e5ff><b>[Jaeger THRUSTER EVADE]</b></color> Dodged incoming Kaiju strike!");
+                return;
+            }
 
             if (IsIronmanCheatActive)
             {
@@ -1412,6 +1622,727 @@ namespace PacificRimWater
             yield return new WaitForSeconds(3.0f);
 
             PacificRimUI.MainMenuUI.Instance?.SetDefeatState();
+        }
+
+#if ENABLE_INPUT_SYSTEM
+        private static UnityEngine.InputSystem.Key GetInputSystemKey(KeyCode kc)
+        {
+            switch (kc)
+            {
+                case KeyCode.C: return UnityEngine.InputSystem.Key.C;
+                case KeyCode.R: return UnityEngine.InputSystem.Key.R;
+                case KeyCode.F: return UnityEngine.InputSystem.Key.F;
+                case KeyCode.T: return UnityEngine.InputSystem.Key.T;
+                case KeyCode.E: return UnityEngine.InputSystem.Key.E;
+                case KeyCode.G: return UnityEngine.InputSystem.Key.G;
+                case KeyCode.V: return UnityEngine.InputSystem.Key.V;
+                case KeyCode.Q: return UnityEngine.InputSystem.Key.Q;
+                case KeyCode.LeftControl: return UnityEngine.InputSystem.Key.LeftCtrl;
+                case KeyCode.LeftAlt: return UnityEngine.InputSystem.Key.LeftAlt;
+                default: return UnityEngine.InputSystem.Key.C;
+            }
+        }
+#endif
+
+        private void CheckDoubleTapDash(bool tapW, bool tapS, bool tapA, bool tapD)
+        {
+            if (IsEmoting || IsExhausted || Time.time < lastDashTime + dashCooldown) return;
+
+            float now = Time.time;
+            Vector2 dir = Vector2.zero;
+
+            if (tapW)
+            {
+                if (now - lastTapW <= doubleTapWindow) dir = new Vector2(0f, 1f);
+                lastTapW = now;
+            }
+            if (tapS)
+            {
+                if (now - lastTapS <= doubleTapWindow) dir = new Vector2(0f, -1f);
+                lastTapS = now;
+            }
+            if (tapA)
+            {
+                if (now - lastTapA <= doubleTapWindow) dir = new Vector2(-1f, 0f);
+                lastTapA = now;
+            }
+            if (tapD)
+            {
+                if (now - lastTapD <= doubleTapWindow) dir = new Vector2(1f, 0f);
+                lastTapD = now;
+            }
+
+            if (dir.sqrMagnitude > 0.01f)
+            {
+                PerformThrusterDash(dir);
+            }
+        }
+
+        private void PerformThrusterDash(Vector2 localDir)
+        {
+            lastDashTime = Time.time;
+            dashEndTime = Time.time + dashDuration;
+            dashLocalDir = localDir.normalized;
+            combatStanceEndTime = Time.time + combatStancePersistDuration;
+            ConsumeStamina(dashStaminaCost);
+
+            Vector3 worldDashDir = (transform.right * dashLocalDir.x + transform.forward * dashLocalDir.y).normalized;
+            dashWorldDir = worldDashDir;
+            dashStartTime = Time.time;
+
+            if (visualSockets == null) visualSockets = GetComponent<JaegerVisualSockets>() ?? GetComponentInChildren<JaegerVisualSockets>();
+            visualSockets?.TriggerRocketBlast(dashDuration + 0.12f);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayRocketIgnition(transform.position + Vector3.up * 14f);
+            StartCoroutine(RocketBurnAudioRoutine(dashDuration + 0.1f));
+
+            if (WaterSplashManager.Instance != null)
+            {
+                WaterSplashManager.Instance.SpawnHeavyMoveWaterKickup(transform.position, worldDashDir, 1.85f, false);
+            }
+        }
+
+        private void ToggleChainswords()
+        {
+            areChainswordsActive = !areChainswordsActive;
+            combatStanceEndTime = Time.time + combatStancePersistDuration;
+
+            chainswordDeployIsOpening = areChainswordsActive;
+            chainswordDeployAnimStartTime = Time.time;
+            chainswordDeployAnimEndTime = Time.time + (areChainswordsActive ? 0.72f : 0.38f);
+
+            EnsureChainswordVisuals();
+            if (activeChainswordAnimCoroutine != null) StopCoroutine(activeChainswordAnimCoroutine);
+            activeChainswordAnimCoroutine = StartCoroutine(AnimateChainswordSlideRoutine(areChainswordsActive));
+
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayHydraulicServo(transform.position + Vector3.up * 13f, 0.85f);
+            if (areChainswordsActive)
+            {
+                PacificRimAudio.PacificRimAudioManager.Instance?.PlaySteamVent(transform.position + Vector3.up * 14f);
+            }
+
+            PacificRimUI.JaegerHUD.Instance?.ShowBanner(
+                areChainswordsActive ? "CHAIN SWORDS // DEPLOYED" : "CHAIN SWORDS // RETRACTED",
+                1.6f);
+        }
+
+        private System.Collections.IEnumerator AnimateChainswordSlideRoutine(bool deploy)
+        {
+            float duration = deploy ? 0.68f : 0.34f;
+            float elapsed = 0f;
+            bool lockCuePlayed = false;
+
+            Vector3 retractOffsetL = (chainswordBladeL != null && chainswordBladeL.transform.parent != null)
+                ? chainswordBladeL.transform.parent.InverseTransformVector((chainswordBladeL.transform.parent.rotation * swordDeployedRotL) * Vector3.right * 0.55f)
+                : Vector3.zero;
+            Vector3 retractOffsetR = (chainswordBladeR != null && chainswordBladeR.transform.parent != null)
+                ? chainswordBladeR.transform.parent.InverseTransformVector((chainswordBladeR.transform.parent.rotation * swordDeployedRotR) * Vector3.right * 0.55f)
+                : Vector3.zero;
+
+            if (deploy)
+            {
+                if (chainswordBladeL != null)
+                {
+                    chainswordBladeL.transform.localPosition = swordDeployedPosL + retractOffsetL;
+                    chainswordBladeL.transform.localRotation = swordDeployedRotL;
+                    chainswordBladeL.transform.localScale = Vector3.Scale(swordDeployedScaleL, new Vector3(0.02f, 0.35f, 0.35f));
+                    chainswordBladeL.SetActive(true);
+                }
+                if (chainswordBladeR != null)
+                {
+                    chainswordBladeR.transform.localPosition = swordDeployedPosR + retractOffsetR;
+                    chainswordBladeR.transform.localRotation = swordDeployedRotR;
+                    chainswordBladeR.transform.localScale = Vector3.Scale(swordDeployedScaleR, new Vector3(0.02f, 0.35f, 0.35f));
+                    chainswordBladeR.SetActive(true);
+                }
+            }
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float rawT = Mathf.Clamp01(elapsed / duration);
+
+                float slide;
+                float xScaleFactor;
+                float yzScaleFactor;
+                float whipAngle = 0f;
+
+                if (deploy)
+                {
+                    if (rawT < 0.75f)
+                    {
+                        float p = rawT / 0.75f;
+                        float ease = 1f - Mathf.Pow(1f - p, 3f);
+                        slide = ease;
+                        xScaleFactor = Mathf.Lerp(0.02f, 1.06f, ease);
+                        yzScaleFactor = Mathf.Lerp(0.35f, 1.0f, ease);
+                        whipAngle = Mathf.Sin(rawT * 28f) * (1f - rawT) * 9f;
+                    }
+                    else
+                    {
+                        float settle = (rawT - 0.75f) / 0.25f;
+                        slide = 1f;
+                        xScaleFactor = Mathf.Lerp(1.06f, 1.0f, settle);
+                        yzScaleFactor = 1f;
+                        whipAngle = 0f;
+                    }
+
+                    if (!lockCuePlayed && rawT >= 0.72f)
+                    {
+                        lockCuePlayed = true;
+                        PacificRimAudio.PacificRimAudioManager.Instance?.PlayParryClang(transform.position + Vector3.up * 15f);
+                        ResolveHandTransforms();
+                        if (handL != null)
+                            WaterSplashManager.Instance?.SpawnCombatSparks(handL.position, transform.forward, isBlocked: true, isHeavy: false, isKaijuTarget: false);
+                        if (handR != null)
+                            WaterSplashManager.Instance?.SpawnCombatSparks(handR.position, transform.forward, isBlocked: true, isHeavy: false, isKaijuTarget: false);
+                    }
+                }
+                else
+                {
+                    float ease = rawT * rawT;
+                    slide = 1f - ease;
+                    xScaleFactor = Mathf.Lerp(1.0f, 0.02f, ease);
+                    yzScaleFactor = Mathf.Lerp(1.0f, 0.35f, ease);
+                }
+
+                Vector3 scaleMult = new Vector3(xScaleFactor, yzScaleFactor, yzScaleFactor);
+                Quaternion whipRot = Quaternion.Euler(0f, whipAngle * 0.6f, whipAngle);
+
+                if (chainswordBladeL != null)
+                {
+                    chainswordBladeL.transform.localPosition = Vector3.Lerp(swordDeployedPosL + retractOffsetL, swordDeployedPosL, slide);
+                    chainswordBladeL.transform.localRotation = swordDeployedRotL * whipRot;
+                    chainswordBladeL.transform.localScale = Vector3.Scale(swordDeployedScaleL, scaleMult);
+                }
+                if (chainswordBladeR != null)
+                {
+                    chainswordBladeR.transform.localPosition = Vector3.Lerp(swordDeployedPosR + retractOffsetR, swordDeployedPosR, slide);
+                    chainswordBladeR.transform.localRotation = swordDeployedRotR * whipRot;
+                    chainswordBladeR.transform.localScale = Vector3.Scale(swordDeployedScaleR, scaleMult);
+                }
+
+                yield return null;
+            }
+
+            if (chainswordBladeL != null)
+            {
+                chainswordBladeL.transform.localPosition = swordDeployedPosL;
+                chainswordBladeL.transform.localRotation = swordDeployedRotL;
+                chainswordBladeL.transform.localScale = swordDeployedScaleL;
+                chainswordBladeL.SetActive(deploy);
+            }
+            if (chainswordBladeR != null)
+            {
+                chainswordBladeR.transform.localPosition = swordDeployedPosR;
+                chainswordBladeR.transform.localRotation = swordDeployedRotR;
+                chainswordBladeR.transform.localScale = swordDeployedScaleR;
+                chainswordBladeR.SetActive(deploy);
+            }
+            activeChainswordAnimCoroutine = null;
+        }
+
+        private void EnsureChainswordVisuals()
+        {
+            ResolveHandTransforms();
+            if (chainswordBladeL == null)
+            {
+                Transform leftSword = FindChildRecursive(transform, "LeftSword");
+                if (leftSword != null) chainswordBladeL = leftSword.gameObject;
+                else if (handL != null) chainswordBladeL = CreateChainswordBladeMesh("ChainswordBlade_L", handL, -1f);
+
+                if (chainswordBladeL != null)
+                {
+                    swordDeployedPosL = chainswordBladeL.transform.localPosition;
+                    swordDeployedRotL = chainswordBladeL.transform.localRotation;
+                    swordDeployedScaleL = chainswordBladeL.transform.localScale;
+                }
+            }
+            if (chainswordBladeR == null)
+            {
+                Transform rightSword = FindChildRecursive(transform, "RightSword");
+                if (rightSword != null) chainswordBladeR = rightSword.gameObject;
+                else if (handR != null) chainswordBladeR = CreateChainswordBladeMesh("ChainswordBlade_R", handR, 1f);
+
+                if (chainswordBladeR != null)
+                {
+                    swordDeployedPosR = chainswordBladeR.transform.localPosition;
+                    swordDeployedRotR = chainswordBladeR.transform.localRotation;
+                    swordDeployedScaleR = chainswordBladeR.transform.localScale;
+                }
+            }
+        }
+
+        private static GameObject CreateChainswordBladeMesh(string objName, Transform handBone, float sideSign)
+        {
+            GameObject blade = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            blade.name = objName;
+            var col = blade.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+
+            blade.transform.SetParent(handBone, false);
+            blade.transform.localPosition = new Vector3(sideSign * 0.004f, 0.018f, 0.012f);
+            blade.transform.localRotation = Quaternion.Euler(12f, 0f, 0f);
+            blade.transform.localScale = new Vector3(0.0028f, 0.048f, 0.0085f);
+
+            var rend = blade.GetComponent<MeshRenderer>();
+            if (rend != null)
+            {
+                Shader urpLit = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+                if (urpLit != null)
+                {
+                    Material mat = new Material(urpLit);
+                    mat.color = new Color(0.18f, 0.22f, 0.28f, 1f);
+                    mat.EnableKeyword("_EMISSION");
+                    mat.SetColor("_EmissionColor", new Color(0.15f, 0.85f, 1.0f, 1f) * 2.2f);
+                    rend.sharedMaterial = mat;
+                }
+            }
+            blade.SetActive(false);
+            return blade;
+        }
+
+        private void TriggerPlasmaCaster()
+        {
+            lastPlasmaTime = Time.time;
+            plasmaAimStartTime = Time.time;
+            plasmaFireTime = Time.time + 0.52f;
+            plasmaAimEndTime = Time.time + 1.08f;
+            combatStanceEndTime = Time.time + combatStancePersistDuration;
+            ConsumeStamina(plasmaStaminaCost);
+
+            if (cachedKaiju == null) cachedKaiju = FindAnyObjectByType<KaijuAI>();
+            if (cachedKaiju != null && !cachedKaiju.IsDead)
+            {
+                plasmaTargetPos = cachedKaiju.transform.position + Vector3.up * 13.5f;
+            }
+            else if (Camera.main != null)
+            {
+                plasmaTargetPos = Camera.main.transform.position + Camera.main.transform.forward * 65f;
+            }
+            else
+            {
+                plasmaTargetPos = transform.position + transform.forward * 65f + Vector3.up * 14f;
+            }
+
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayHydraulicServo(transform.position + Vector3.up * 13f, 0.9f);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayEmpChargeUp(transform.position + Vector3.up * 15f);
+            PacificRimUI.JaegerHUD.Instance?.ShowBanner("I-19 PLASMACASTER // CHARGING", 1.1f);
+            StartCoroutine(FirePlasmaBoltRoutine(0.52f));
+        }
+
+        private static Material CreatePlasmaMaterial(Color baseCol, Color hdrEmission, bool transparent = false)
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit")
+                         ?? Shader.Find("Universal Render Pipeline/Unlit")
+                         ?? Shader.Find("Standard");
+            if (shader == null) return null;
+
+            Material mat = new Material(shader);
+            mat.color = baseCol;
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", baseCol);
+            mat.EnableKeyword("_EMISSION");
+            if (mat.HasProperty("_EmissionColor")) mat.SetColor("_EmissionColor", hdrEmission);
+
+            if (transparent)
+            {
+                if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
+                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
+                mat.SetInt("_ZWrite", 0);
+                mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            }
+
+            return mat;
+        }
+
+        private System.Collections.IEnumerator FirePlasmaBoltRoutine(float windupDelay)
+        {
+            // --- Stage 1: Muzzle Charge-Up Orb ---
+            GameObject chargeRoot = new GameObject("PlasmaMuzzleCharge");
+            GameObject chargeCore = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            chargeCore.name = "Core";
+            var coreCol = chargeCore.GetComponent<Collider>();
+            if (coreCol != null) Destroy(coreCol);
+            chargeCore.transform.SetParent(chargeRoot.transform, false);
+            var coreRend = chargeCore.GetComponent<MeshRenderer>();
+            if (coreRend != null)
+                coreRend.sharedMaterial = CreatePlasmaMaterial(new Color(0.92f, 0.99f, 1f, 1f), new Color(0.6f, 0.95f, 1f, 1f) * 5.5f);
+
+            GameObject chargeCorona = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            chargeCorona.name = "Corona";
+            var coronaCol = chargeCorona.GetComponent<Collider>();
+            if (coronaCol != null) Destroy(coronaCol);
+            chargeCorona.transform.SetParent(chargeRoot.transform, false);
+            chargeCorona.transform.localScale = Vector3.one * 1.65f;
+            var coronaRend = chargeCorona.GetComponent<MeshRenderer>();
+            if (coronaRend != null)
+                coronaRend.sharedMaterial = CreatePlasmaMaterial(new Color(0.15f, 0.85f, 1f, 0.42f), new Color(0.12f, 0.80f, 1f, 1f) * 3.2f, transparent: true);
+
+            Light chargeLight = chargeRoot.AddComponent<Light>();
+            chargeLight.type = LightType.Point;
+            chargeLight.color = new Color(0.2f, 0.88f, 1f, 1f);
+            chargeLight.range = 28f;
+            chargeLight.intensity = 10f;
+
+            float chargeElapsed = 0f;
+            bool chargeSparkSpawned = false;
+            while (chargeElapsed < windupDelay)
+            {
+                if (this == null || IsDead)
+                {
+                    Destroy(chargeRoot);
+                    yield break;
+                }
+
+                chargeElapsed += Time.deltaTime;
+                float u = Mathf.Clamp01(chargeElapsed / Mathf.Max(0.01f, windupDelay));
+
+                ResolveHandTransforms();
+                Vector3 handPos = handR != null ? handR.position : (transform.position + transform.forward * 5f + Vector3.up * 15f);
+                if (cachedKaiju != null && !cachedKaiju.IsDead)
+                {
+                    plasmaTargetPos = cachedKaiju.transform.position + Vector3.up * 13.5f;
+                }
+                Vector3 aimDir = (plasmaTargetPos - handPos).normalized;
+                chargeRoot.transform.position = handPos + aimDir * 0.9f;
+
+                float pulse = 1f + 0.18f * Mathf.Sin(chargeElapsed * 45f);
+                float baseScale = Mathf.Lerp(0.15f, 2.3f, u * u) * pulse;
+                chargeRoot.transform.localScale = Vector3.one * baseScale;
+                chargeLight.intensity = Mathf.Lerp(10f, 420f, u);
+
+                if (!chargeSparkSpawned && u >= 0.5f)
+                {
+                    chargeSparkSpawned = true;
+                    WaterSplashManager.Instance?.SpawnCombatSparks(chargeRoot.transform.position, aimDir, isBlocked: false, isHeavy: false, isKaijuTarget: false);
+                }
+
+                yield return null;
+            }
+
+            Destroy(chargeRoot);
+            if (this == null || IsDead) yield break;
+
+            // --- Stage 2: Cannon Discharge, Muzzle Shockwave & Multi-Layered Projectile ---
+            ResolveHandTransforms();
+            if (cachedKaiju != null && !cachedKaiju.IsDead)
+            {
+                plasmaTargetPos = cachedKaiju.transform.position + Vector3.up * 13.5f;
+            }
+
+            Vector3 handMuzzleBase = handR != null ? handR.position : (transform.position + transform.forward * 5f + Vector3.up * 15f);
+            Vector3 dir = (plasmaTargetPos - handMuzzleBase).normalized;
+            Vector3 muzzlePos = handMuzzleBase + dir * 1.4f;
+
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayEmpDischargeBlast(muzzlePos);
+            PacificRimAudio.PacificRimAudioManager.Instance?.PlayAttackWhoosh(muzzlePos, isHeavy: true);
+
+            if (rb != null) rb.AddForce(-dir * 16f, ForceMode.Impulse);
+            TriggerAttackCameraFeedback(4, isHeavy: false, didHit: true);
+            WaterSplashManager.Instance?.SpawnHeavyMoveWaterKickup(new Vector3(muzzlePos.x, transform.position.y, muzzlePos.z), dir, 1.75f, false);
+            WaterSplashManager.Instance?.SpawnParrySparks(muzzlePos, dir);
+
+            GameObject bolt = new GameObject("PlasmaCasterBolt");
+            bolt.transform.position = muzzlePos;
+
+            GameObject boltCore = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            boltCore.name = "PlasmaCore";
+            var boltCoreCol = boltCore.GetComponent<Collider>();
+            if (boltCoreCol != null) Destroy(boltCoreCol);
+            boltCore.transform.SetParent(bolt.transform, false);
+            boltCore.transform.localScale = Vector3.one * 1.5f;
+            var boltCoreRend = boltCore.GetComponent<MeshRenderer>();
+            if (boltCoreRend != null)
+                boltCoreRend.sharedMaterial = CreatePlasmaMaterial(new Color(0.88f, 0.98f, 1f, 1f), new Color(0.75f, 0.97f, 1f, 1f) * 6.5f);
+
+            GameObject boltShell = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            boltShell.name = "PlasmaShell";
+            var boltShellCol = boltShell.GetComponent<Collider>();
+            if (boltShellCol != null) Destroy(boltShellCol);
+            boltShell.transform.SetParent(bolt.transform, false);
+            boltShell.transform.localScale = Vector3.one * 3.0f;
+            var boltShellRend = boltShell.GetComponent<MeshRenderer>();
+            if (boltShellRend != null)
+                boltShellRend.sharedMaterial = CreatePlasmaMaterial(new Color(0.12f, 0.72f, 1.0f, 0.45f), new Color(0.10f, 0.72f, 1.0f, 1f) * 3.8f, transparent: true);
+
+            var light = bolt.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.color = new Color(0.22f, 0.88f, 1.0f, 1f);
+            light.range = 50f;
+            light.intensity = 380f;
+
+            var trail = bolt.AddComponent<TrailRenderer>();
+            Shader trailShader = Shader.Find("Sprites/Default") ?? Shader.Find("Universal Render Pipeline/Unlit");
+            if (trailShader != null)
+            {
+                trail.sharedMaterial = new Material(trailShader);
+            }
+            trail.time = 0.28f;
+            trail.startWidth = 2.1f;
+            trail.endWidth = 0.05f;
+            Gradient grad = new Gradient();
+            grad.SetKeys(
+                new GradientColorKey[]
+                {
+                    new GradientColorKey(new Color(0.85f, 0.98f, 1f), 0f),
+                    new GradientColorKey(new Color(0.15f, 0.74f, 1f), 0.45f),
+                    new GradientColorKey(new Color(0.05f, 0.35f, 0.85f), 1f)
+                },
+                new GradientAlphaKey[]
+                {
+                    new GradientAlphaKey(0.95f, 0f),
+                    new GradientAlphaKey(0.60f, 0.45f),
+                    new GradientAlphaKey(0f, 1f)
+                });
+            trail.colorGradient = grad;
+
+            float travelElapsed = 0f;
+            float wakeTimer = 0f;
+            bool steamVented = false;
+            bool impacted = false;
+            while (travelElapsed < 1.8f && bolt != null)
+            {
+                if (cachedKaiju != null && !cachedKaiju.IsDead)
+                {
+                    Vector3 toKaiju = ((cachedKaiju.transform.position + Vector3.up * 13.5f) - bolt.transform.position).normalized;
+                    dir = Vector3.RotateTowards(dir, toKaiju, 1.6f * Time.deltaTime, 0f);
+                }
+
+                float step = plasmaBoltSpeed * Time.deltaTime;
+                bolt.transform.position += dir * step;
+                travelElapsed += Time.deltaTime;
+
+                float shellPulse = 2.8f + 0.45f * Mathf.Sin(travelElapsed * 38f);
+                boltShell.transform.localScale = Vector3.one * shellPulse;
+
+                wakeTimer += Time.deltaTime;
+                if (wakeTimer >= 0.06f)
+                {
+                    wakeTimer = 0f;
+                    if (WaterSystem.Instance != null)
+                    {
+                        Vector3 boltPos = bolt.transform.position;
+                        float wy = WaterSystem.Instance.GetWaterHeight(boltPos);
+                        WaterSplashManager.Instance?.SpawnHeavyMoveWaterKickup(new Vector3(boltPos.x, wy, boltPos.z), dir, 1.15f, false);
+                    }
+                }
+
+                if (!steamVented && travelElapsed >= 0.22f)
+                {
+                    steamVented = true;
+                    PacificRimAudio.PacificRimAudioManager.Instance?.PlaySteamVent(transform.position + Vector3.up * 14f);
+                }
+
+                if (cachedKaiju != null && !cachedKaiju.IsDead)
+                {
+                    float dist = Vector3.Distance(bolt.transform.position, cachedKaiju.transform.position + Vector3.up * 12f);
+                    if (dist <= 10.5f)
+                    {
+                        impacted = true;
+                        break;
+                    }
+                }
+                yield return null;
+            }
+
+            // --- Stage 3: Plasma Detonation Fireball ---
+            if (bolt != null)
+            {
+                Vector3 hitPos = bolt.transform.position;
+                Destroy(bolt);
+
+                if (impacted && cachedKaiju != null && !cachedKaiju.IsDead)
+                {
+                    float dmg = IsPoweredUp ? plasmaDamage * 1.25f : plasmaDamage;
+                    cachedKaiju.TakeDamage(dmg, dir * 38f, attackVariant: 4, hitPoint: hitPos);
+                    PacificRimAudio.PacificRimAudioManager.Instance?.PlayLightningStrike(hitPos);
+                    PacificRimAudio.PacificRimAudioManager.Instance?.PlayJaegerPunchHit(hitPos, isHeavy: true);
+                    WaterSplashManager.Instance?.SpawnParrySparks(hitPos, -dir);
+                    WaterSplashManager.Instance?.SpawnCombatSparks(hitPos, -dir, isBlocked: false, isHeavy: true, isKaijuTarget: true);
+                    WaterSplashManager.Instance?.SpawnHeavyMoveWaterKickup(hitPos, dir, 3.0f, true);
+                    TriggerAttackCameraFeedback(4, isHeavy: true, didHit: true);
+                }
+
+                StartCoroutine(SpawnPlasmaDetonationRoutine(hitPos));
+            }
+        }
+
+        private System.Collections.IEnumerator SpawnPlasmaDetonationRoutine(Vector3 hitPos)
+        {
+            GameObject flash = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            flash.name = "PlasmaDetonationFlash";
+            var col = flash.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+            flash.transform.position = hitPos;
+            flash.transform.localScale = Vector3.one * 3f;
+
+            Material flashMat = CreatePlasmaMaterial(new Color(0.55f, 0.94f, 1f, 0.72f), new Color(0.45f, 0.92f, 1f, 1f) * 6f, transparent: true);
+            var rend = flash.GetComponent<MeshRenderer>();
+            if (rend != null && flashMat != null)
+            {
+                rend.sharedMaterial = flashMat;
+            }
+
+            Light flashLight = flash.AddComponent<Light>();
+            flashLight.type = LightType.Point;
+            flashLight.color = new Color(0.35f, 0.92f, 1f, 1f);
+            flashLight.range = 65f;
+            flashLight.intensity = 600f;
+
+            float duration = 0.26f;
+            float elapsed = 0f;
+            while (elapsed < duration && flash != null)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float scale = Mathf.Lerp(3f, 16f, 1f - Mathf.Pow(1f - t, 2f));
+                flash.transform.localScale = Vector3.one * scale;
+                flashLight.intensity = Mathf.Lerp(600f, 0f, t);
+
+                if (flashMat != null)
+                {
+                    Color c = new Color(0.55f, 0.94f, 1f, Mathf.Lerp(0.72f, 0f, t));
+                    flashMat.color = c;
+                    if (flashMat.HasProperty("_BaseColor")) flashMat.SetColor("_BaseColor", c);
+                }
+                yield return null;
+            }
+
+            if (flash != null) Destroy(flash);
+        }
+
+        /// <summary>
+        /// Plasma Caster aim pose: torso twists to lead with the right shoulder, chest pitches toward the
+        /// target's elevation, the right arm extends along the shoulder->target line with a dropped elbow,
+        /// and a decaying recoil kick snaps the forearm + chest back on fire. All blended by a smoothed weight.
+        /// </summary>
+        private void ApplyCombatArmsIK(float dt)
+        {
+            bool wantAim = IsPlasmaAiming && !IsEmoting && !IsDead;
+            plasmaIKWeight = Mathf.MoveTowards(plasmaIKWeight, wantAim ? 1f : 0f, (wantAim ? 6.5f : 4f) * dt);
+
+            // Recoil impulse fires once at plasmaFireTime, then decays
+            if (Time.time >= plasmaFireTime && Time.time < plasmaFireTime + dt + 0.0001f)
+            {
+                plasmaRecoilKick = 1f;
+            }
+            plasmaRecoilKick = Mathf.MoveTowards(plasmaRecoilKick, 0f, 5.5f * dt);
+
+            if (plasmaIKWeight > 0.001f && upperArmR != null && forearmR != null && handR != null)
+            {
+                float w = Mathf.SmoothStep(0f, 1f, plasmaIKWeight);
+                float recoil = plasmaRecoilKick * plasmaRecoilKick; // sharp snap, smooth settle
+
+                // 1. Torso twist toward target (leading with right shoulder) + elevation pitch + recoil rock
+                Vector3 toTarget = plasmaTargetPos - (chest != null ? chest.position : transform.position);
+                Vector3 flat = new Vector3(toTarget.x, 0f, toTarget.z);
+                float yawToTarget = flat.sqrMagnitude > 0.01f ? Vector3.SignedAngle(transform.forward, flat.normalized, Vector3.up) : 0f;
+                float twist = Mathf.Clamp(yawToTarget - 22f, -55f, 35f) * w - recoil * 8f; // -22deg brings right shoulder forward
+                float pitch = flat.sqrMagnitude > 0.01f
+                    ? Mathf.Clamp(-Mathf.Atan2(toTarget.y, flat.magnitude) * Mathf.Rad2Deg, -20f, 20f) * 0.5f * w
+                    : 0f;
+
+                if (spine1 != null)
+                {
+                    spine1.rotation = Quaternion.AngleAxis(twist * 0.55f, Vector3.up) * spine1.rotation;
+                }
+                if (chest != null)
+                {
+                    chest.rotation = Quaternion.AngleAxis(twist * 0.45f, Vector3.up)
+                                   * Quaternion.AngleAxis(pitch - recoil * 11f, transform.right)
+                                   * chest.rotation;
+                }
+
+                // 2. Right arm extends along shoulder -> target (re-read shoulder after torso twist)
+                Vector3 shoulder = upperArmR.position;
+                Vector3 aimDir = (plasmaTargetPos - shoulder).normalized;
+                float l1 = Vector3.Distance(upperArmR.position, forearmR.position);
+                float l2 = Vector3.Distance(forearmR.position, handR.position);
+                float reach = (l1 + l2);
+
+                // Slight elbow bend at rest (0.94), arm compresses strongly on recoil (0.70) and kicks upward
+                float extension = Mathf.Lerp(0.94f, 0.70f, recoil);
+                Vector3 recoilLift = Vector3.up * (reach * 0.20f * recoil) - aimDir * (reach * 0.08f * recoil);
+
+                // Subtle high-frequency containment tremor during capacitor charge-up
+                Vector3 chargeTremor = Vector3.zero;
+                if (Time.time < plasmaFireTime)
+                {
+                    float chargeRatio = Mathf.Clamp01((Time.time - plasmaAimStartTime) / Mathf.Max(0.01f, plasmaFireTime - plasmaAimStartTime));
+                    chargeTremor = (transform.right * Mathf.Sin(Time.time * 52f) + Vector3.up * Mathf.Cos(Time.time * 47f)) * (0.14f * chargeRatio);
+                }
+
+                Vector3 aimHandPos = shoulder + aimDir * (reach * extension) + recoilLift + chargeTremor;
+                Vector3 blendedTarget = Vector3.Lerp(handR.position, aimHandPos, w);
+
+                // Elbow drops down and slightly outward — natural "gun arm" posture
+                Vector3 elbowPole = (-Vector3.up * 1.0f + transform.right * 0.45f - aimDir * 0.25f).normalized;
+                SolveTwoBoneIKWorld(upperArmR, forearmR, handR, blendedTarget, elbowPole, keepTipLocalRotation: true);
+
+                // 3. Left-arm counter-brace tucked across lower chest/ribs as stabilizer
+                if (upperArmL != null && forearmL != null && handL != null)
+                {
+                    Vector3 braceAnchor = chest != null ? chest.position : (transform.position + Vector3.up * 14f);
+                    float reachL = Vector3.Distance(upperArmL.position, forearmL.position) + Vector3.Distance(forearmL.position, handL.position);
+                    Vector3 braceTarget = braceAnchor + transform.forward * (reachL * 0.42f) - transform.right * (reachL * 0.14f) - Vector3.up * (reachL * 0.16f);
+                    Vector3 blendedBraceL = Vector3.Lerp(handL.position, braceTarget, w * 0.75f);
+                    Vector3 poleL = (-Vector3.up - transform.right * 0.65f - transform.forward * 0.15f).normalized;
+                    SolveTwoBoneIKWorld(upperArmL, forearmL, handL, blendedBraceL, poleL, keepTipLocalRotation: true);
+                }
+                return;
+            }
+
+            // 2. One-shot Chainsword Deployment / Retraction Arm Flourish (only while deploying/retracting)
+            if (IsChainswordDeploying && !IsEmoting && !IsDead && !isBlocking && Time.time >= lightAttackEndTime && Time.time >= heavyAttackEndTime)
+            {
+                float totalDur = Mathf.Max(0.01f, chainswordDeployAnimEndTime - chainswordDeployAnimStartTime);
+                float u = Mathf.Clamp01((Time.time - chainswordDeployAnimStartTime) / totalDur);
+                float env = Mathf.Sin(u * Mathf.PI);
+
+                if (upperArmL != null && forearmL != null && handL != null && upperArmR != null && forearmR != null && handR != null)
+                {
+                    Vector3 anchor = chest != null ? chest.position : (transform.position + Vector3.up * 14f);
+                    float reachL = Vector3.Distance(upperArmL.position, forearmL.position) + Vector3.Distance(forearmL.position, handL.position);
+                    float reachR = Vector3.Distance(upperArmR.position, forearmR.position) + Vector3.Distance(forearmR.position, handR.position);
+
+                    Vector3 poseL;
+                    Vector3 poseR;
+                    if (chainswordDeployIsOpening)
+                    {
+                        if (u < 0.42f)
+                        {
+                            float p = Mathf.SmoothStep(0f, 1f, u / 0.42f);
+                            poseL = Vector3.Lerp(handL.position, anchor + transform.forward * (reachL * 0.45f) - transform.right * (reachL * 0.18f) + Vector3.up * (reachL * 0.12f), p);
+                            poseR = Vector3.Lerp(handR.position, anchor + transform.forward * (reachR * 0.45f) + transform.right * (reachR * 0.18f) + Vector3.up * (reachR * 0.12f), p);
+                        }
+                        else
+                        {
+                            float p = Mathf.SmoothStep(0f, 1f, (u - 0.42f) / 0.58f);
+                            Vector3 chestGuardL = anchor + transform.forward * (reachL * 0.45f) - transform.right * (reachL * 0.18f) + Vector3.up * (reachL * 0.12f);
+                            Vector3 chestGuardR = anchor + transform.forward * (reachR * 0.45f) + transform.right * (reachR * 0.18f) + Vector3.up * (reachR * 0.12f);
+                            Vector3 snapOutL = anchor + transform.forward * (reachL * 0.40f) - transform.right * (reachL * 0.68f) - Vector3.up * (reachL * 0.14f);
+                            Vector3 snapOutR = anchor + transform.forward * (reachR * 0.40f) + transform.right * (reachR * 0.68f) - Vector3.up * (reachR * 0.14f);
+                            Vector3 snapPosL = Vector3.Lerp(chestGuardL, snapOutL, Mathf.Clamp01(p * 1.45f));
+                            Vector3 snapPosR = Vector3.Lerp(chestGuardR, snapOutR, Mathf.Clamp01(p * 1.45f));
+                            poseL = Vector3.Lerp(snapPosL, handL.position, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((p - 0.55f) / 0.45f)));
+                            poseR = Vector3.Lerp(snapPosR, handR.position, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((p - 0.55f) / 0.45f)));
+                        }
+                    }
+                    else
+                    {
+                        Vector3 tuckL = anchor + transform.forward * (reachL * 0.35f) - transform.right * (reachL * 0.28f);
+                        Vector3 tuckR = anchor + transform.forward * (reachR * 0.35f) + transform.right * (reachR * 0.28f);
+                        poseL = Vector3.Lerp(handL.position, tuckL, env);
+                        poseR = Vector3.Lerp(handR.position, tuckR, env);
+                    }
+
+                    Vector3 poleL = (-Vector3.up - transform.right * 0.55f - transform.forward * 0.2f).normalized;
+                    Vector3 poleR = (-Vector3.up + transform.right * 0.55f - transform.forward * 0.2f).normalized;
+                    SolveTwoBoneIKWorld(upperArmL, forearmL, handL, poseL, poleL, keepTipLocalRotation: true);
+                    SolveTwoBoneIKWorld(upperArmR, forearmR, handR, poseR, poleR, keepTipLocalRotation: true);
+                }
+            }
         }
     }
 }

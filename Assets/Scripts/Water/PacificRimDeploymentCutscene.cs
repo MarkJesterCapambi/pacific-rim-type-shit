@@ -27,8 +27,12 @@ namespace PacificRimCutscene
         public Vector3 airborneReleasePosition = new Vector3(0f, 27.5f, -4f);
 
         [Header("Timing")]
-        public float transportDuration = 5.2f;
+        public float transportDuration = 9.5f;
         public float freefallTimeout = 3.5f;
+
+        [Header("Cutscene Ocean Scale")]
+        [Tooltip("Temporarily multiplies OceanWaterMesh width and length during the elevated aerial cutscene.")]
+        public float cutsceneOceanScaleMultiplier = 2.2f;
 
         [Header("Assets & Prefabs")]
         public GameObject chinookPrefab;
@@ -67,6 +71,10 @@ namespace PacificRimCutscene
         private Transform jaegerChest;
         private Coroutine activeCutsceneRoutine;
         private Coroutine activeKaijuRotateRoutine;
+        private PacificRimWater.OceanWaterMesh oceanWaterMesh;
+        private float savedOceanWidth;
+        private float savedOceanLength;
+        private bool hasExpandedOcean = false;
 
         private void Awake()
         {
@@ -76,6 +84,11 @@ namespace PacificRimCutscene
         private void Start()
         {
             ResolveReferences();
+
+            if (playOnStart && kaijuAI != null)
+            {
+                kaijuAI.SetCutscenePose(0f);
+            }
 
             // If the Loading Screen is actively managing the transition and deep preloading,
             // wait for it to complete; it will call StartCutscene() when all scene assets are 100% pre-warmed.
@@ -131,6 +144,11 @@ namespace PacificRimCutscene
 
             var kgo = GameObject.Find("Kaiju_Leatherback");
             if (kgo != null) kaijuAI = kgo.GetComponent<PacificRimWater.KaijuAI>();
+
+            if (oceanWaterMesh == null)
+            {
+                oceanWaterMesh = FindAnyObjectByType<PacificRimWater.OceanWaterMesh>();
+            }
 
             mainCamera = Camera.main;
             if (mainCamera != null)
@@ -267,6 +285,8 @@ namespace PacificRimCutscene
             if (isCutsceneRunning || jaegerTransform == null) yield break;
             isCutsceneRunning = true;
 
+            ExpandOceanForCutscene();
+
             // 1. Lock player control & hide combat HUD
             if (jaegerController != null)
             {
@@ -293,11 +313,10 @@ namespace PacificRimCutscene
                 visualSockets.SetCutsceneBeamMultiplier(3.5f);
             }
 
-            // 3. Freeze Kaiju AI and face away initially (+Z)
+            // 3. Freeze Kaiju AI and face away initially (0, 0, 0) until the foghorn sounds
             if (kaijuAI != null)
             {
-                kaijuAI.isCutsceneMode = true;
-                kaijuAI.transform.rotation = Quaternion.Euler(0f, 0f, 0f);
+                kaijuAI.SetCutscenePose(0f);
             }
 
             // 4. Show Cinematic Letterbox Bars
@@ -326,7 +345,7 @@ namespace PacificRimCutscene
             float elapsed = 0f;
             bool skipped = false;
             bool foghornTriggered = false;
-            float foghornLeadTime = 1.4f;
+            float foghornLeadTime = 3.2f;
 
             while (elapsed < transportDuration)
             {
@@ -386,15 +405,35 @@ namespace PacificRimCutscene
 
         private void TriggerFoghornAndKaijuTurn()
         {
-            // Play Iconic Gipsy Danger Foghorn
+            // Play Iconic Gipsy Danger Foghorn and wait until halfway through the sound before Leatherback's IK turn
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayGipsyFoghorn(jaegerTransform.position + Vector3.up * 18f);
 
-            // Turn Leatherback 180 degrees smoothly to face Gipsy
+            float foghornHalfDelay = 1.3f;
+            var clip = PacificRimAudio.PacificRimAudioManager.Instance?.GetClip("GipsyFoghorn");
+            if (clip != null && clip.length > 0.1f)
+            {
+                foghornHalfDelay = clip.length * 0.5f;
+            }
+
             if (kaijuAI != null)
             {
                 if (activeKaijuRotateRoutine != null) StopCoroutine(activeKaijuRotateRoutine);
-                activeKaijuRotateRoutine = StartCoroutine(SmoothRotateKaiju(1.4f));
+                activeKaijuRotateRoutine = StartCoroutine(WaitForFoghornHalfwayThenTurn(foghornHalfDelay));
             }
+        }
+
+        private IEnumerator WaitForFoghornHalfwayThenTurn(float delay)
+        {
+            if (delay > 0f)
+            {
+                yield return new WaitForSeconds(delay);
+            }
+
+            if (kaijuAI != null)
+            {
+                kaijuAI.TriggerFoghornAttentionTurn(3.4f, overrideTargetYaw: 180f);
+            }
+            activeKaijuRotateRoutine = null;
         }
 
         private IEnumerator SmoothRotateKaiju(float duration)
@@ -655,11 +694,39 @@ namespace PacificRimCutscene
                 }
             }
 
-            yield return new WaitForSeconds(0.45f);
+            yield return new WaitForSeconds(1.1f);
+        }
+
+        private void ExpandOceanForCutscene()
+        {
+            if (oceanWaterMesh == null)
+            {
+                oceanWaterMesh = FindAnyObjectByType<PacificRimWater.OceanWaterMesh>();
+            }
+            if (oceanWaterMesh != null && !hasExpandedOcean && cutsceneOceanScaleMultiplier > 1.01f)
+            {
+                savedOceanWidth = oceanWaterMesh.meshWidth;
+                savedOceanLength = oceanWaterMesh.meshLength;
+                oceanWaterMesh.meshWidth = savedOceanWidth * cutsceneOceanScaleMultiplier;
+                oceanWaterMesh.meshLength = savedOceanLength * cutsceneOceanScaleMultiplier;
+                hasExpandedOcean = true;
+            }
+        }
+
+        private void RestoreOceanAfterCutscene()
+        {
+            if (hasExpandedOcean && oceanWaterMesh != null)
+            {
+                oceanWaterMesh.meshWidth = savedOceanWidth;
+                oceanWaterMesh.meshLength = savedOceanLength;
+            }
+            hasExpandedOcean = false;
         }
 
         private IEnumerator ExitCutsceneAndBootHUD()
         {
+            RestoreOceanAfterCutscene();
+
             // 1. Cut freecam and slowly move camera back to its over-the-shoulder natural position
             if (cameraFollowScript != null)
             {
@@ -667,11 +734,11 @@ namespace PacificRimCutscene
             }
             if (PacificRimWater.JaegerCameraFollow.Instance != null)
             {
-                PacificRimWater.JaegerCameraFollow.Instance.SmoothTransitionToOverTheShoulder(1.8f);
+                PacificRimWater.JaegerCameraFollow.Instance.SmoothTransitionToOverTheShoulder(2.2f);
             }
 
             // 2. Slide letterbox bars offscreen
-            float slideDuration = 0.85f;
+            float slideDuration = 1.15f;
             float slideElapsed = 0f;
 
             Vector2 topStart = topBar != null ? topBar.anchoredPosition : Vector2.zero;
@@ -732,6 +799,8 @@ namespace PacificRimCutscene
 
         private IEnumerator HandleCutsceneSkipped()
         {
+            RestoreOceanAfterCutscene();
+
             // Immediate cleanup for skip
             for (int i = 0; i < activeCables.Count; i++)
             {
@@ -777,10 +846,10 @@ namespace PacificRimCutscene
                 visualSockets.SetCutsceneBeamMultiplier(1.0f);
             }
 
-            // Face Leatherback toward Gipsy and unfreeze
+            // Face Leatherback to (0, 180, 0) and unfreeze
             if (kaijuAI != null)
             {
-                kaijuAI.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+                kaijuAI.SetCutscenePose(180f);
                 kaijuAI.isCutsceneMode = false;
             }
 

@@ -14,7 +14,13 @@ Shader "PacificRim/StormSkybox"
         _CloudSpeed("Cloud Wind Speed", Range(0.5, 8.0)) = 3.2
         _CloudChurnSpeed("Cloud Churn / Boil Speed", Range(0.0, 3.0)) = 1.1
         _ScudSpeedMultiplier("Low Scud Wind Speed", Range(1.0, 6.0)) = 3.4
+        _CloudParallaxDepth("Volumetric Cloud Depth", Range(0.05, 0.8)) = 0.34
         _CloudNoiseTex("Cloud Noise", 2D) = "gray" {}
+        _MoonDirection("Moon Direction (XYZ)", Vector) = (0.36, 0.40, 0.84, 0.0)
+        _MoonSize("Moon Angular Size", Range(0.006, 0.08)) = 0.026
+        _MoonColor("Moon Disc Color", Color) = (0.88, 0.94, 1.0, 1.0)
+        _MoonIntensity("Moon Brightness", Range(0.2, 6.0)) = 2.6
+        _MoonHaloIntensity("Moon Cloud Scatter / Halo", Range(0.0, 3.0)) = 1.35
     }
 
     SubShader
@@ -68,7 +74,13 @@ Shader "PacificRim/StormSkybox"
                 float _CloudSpeed;
                 float _CloudChurnSpeed;
                 float _ScudSpeedMultiplier;
+                float _CloudParallaxDepth;
                 float4 _CloudNoiseTex_ST;
+                float4 _MoonDirection;
+                float _MoonSize;
+                half4 _MoonColor;
+                float _MoonIntensity;
+                float _MoonHaloIntensity;
             CBUFFER_END
 
             float4 _GlobalWindVector;
@@ -82,6 +94,29 @@ Shader "PacificRim/StormSkybox"
                 return output;
             }
 
+            float SampleCloudDensity(float2 uv, float2 windPan, float churn, out float billowOut)
+            {
+                float2 churnShift1 = float2(sin(churn * 0.9 + uv.y * 2.2), cos(churn * 0.7 + uv.x * 2.2)) * 0.032;
+                float2 churnShift2 = float2(cos(churn * 1.1 - uv.x * 2.6), sin(churn * 0.8 - uv.y * 2.6)) * 0.032;
+
+                float warp1 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, uv * 0.7 + windPan * 0.6 + churnShift1).r;
+                float warp2 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, uv * 0.7 + float2(0.43, 0.27) - windPan * 0.35 + churnShift2).r;
+                float2 warpedUV = uv + float2(warp1 - 0.5, warp2 - 0.5) * 0.55 + windPan;
+
+                float nMacro = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, warpedUV * 0.65).r;
+                float nMid   = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, warpedUV * 1.55 + float2(0.31, 0.19)).r;
+                float nMicro = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, warpedUV * 3.60 - float2(0.18, 0.44)).r;
+
+                float fbm = nMacro * 0.50 + nMid * 0.35 + nMicro * 0.15;
+                float billow = 1.0 - abs(nMid * 2.0 - 1.0);
+                billowOut = billow;
+
+                // Fibrous edge erosion for realistic ragged cloud wisps
+                float combined = fbm * 0.74 + billow * 0.26 - (1.0 - nMicro) * 0.08;
+                float threshold = 1.0 - _CloudCover;
+                return smoothstep(threshold - _CloudSoftness, threshold + _CloudSoftness, combined);
+            }
+
             half4 frag(Varyings input) : SV_Target
             {
                 float3 dir = normalize(input.viewDir);
@@ -89,52 +124,89 @@ Shader "PacificRim/StormSkybox"
 
                 half3 skyBase = lerp(_HorizonColor.rgb, _ZenithColor.rgb, pow(elev, 0.55));
 
+                // Moon setup (behind the cloud deck)
+                float3 moonDir = normalize(_MoonDirection.xyz);
+                float moonDot = dot(dir, moonDir);
+                float moonAngle = acos(clamp(moonDot, -1.0, 1.0));
+                float moonDisc = smoothstep(_MoonSize + 0.0022, _MoonSize - 0.0022, moonAngle);
+
+                // Project subtle lunar maria detail onto the moon disc
+                float3 moonRight = normalize(cross(float3(0.0, 1.0, 0.0), moonDir));
+                float3 moonUp = cross(moonDir, moonRight);
+                float2 moonLocalUV = float2(dot(dir - moonDir, moonRight), dot(dir - moonDir, moonUp)) / max(_MoonSize, 0.001) * 0.5 + 0.5;
+                float lunarMare = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, moonLocalUV * 1.35 + float2(0.17, 0.31)).r;
+                half3 moonSurface = _MoonColor.rgb * (half)(_MoonIntensity * lerp(0.72, 1.08, lunarMare));
+                float moonHorizonMask = smoothstep(-0.02, 0.08, dir.y);
+
+                // Clear-sky atmospheric moon halo
+                float clearHalo = pow(saturate(moonDot), 28.0) * 0.25 + pow(saturate(moonDot), 180.0) * 0.55;
+                skyBase += _MoonColor.rgb * (half)(clearHalo * _MoonHaloIntensity * moonHorizonMask);
+                skyBase = lerp(skyBase, moonSurface, saturate(moonDisc * moonHorizonMask));
+
                 // Curved dome projection without severe horizon pinching
                 float2 skyUV = dir.xz / (sqrt(dir.y * dir.y + 0.06) + dir.y * 0.25);
                 float t = _Time.y;
                 float2 windDir = normalize(_GlobalWindVector.xy + float2(0.85, 0.52));
                 float windSpeed = length(_GlobalWindVector.xy) > 0.1 ? length(_GlobalWindVector.xy) : 24.0;
-                
-                // Active, cinematic storm cloud movement across the sky
+
                 float cloudSpeedFactor = max(0.2, _CloudSpeed);
                 float2 windPan = windDir * (t * windSpeed * 0.0032 * cloudSpeedFactor);
-
-                // --- Layer 1: Cumulonimbus Storm Deck with Domain Warping & Rolling Churn ---
                 float churn = t * 0.18 * _CloudChurnSpeed;
-                float2 churnShift1 = float2(sin(churn * 0.9 + skyUV.y * 0.4), cos(churn * 0.7 + skyUV.x * 0.4)) * 0.045;
-                float2 churnShift2 = float2(cos(churn * 1.1 - skyUV.x * 0.5), sin(churn * 0.8 - skyUV.y * 0.5)) * 0.045;
 
+                // --- Layer 1: Volumetric Multi-Slice Ray-Marched Storm Cloud Deck ---
+                const int SLICE_COUNT = 5;
                 float2 baseUV = skyUV * (0.16 * _CloudDetailScale);
-                float warp1 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, baseUV * 0.7 + windPan * 0.6 + churnShift1).r;
-                float warp2 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, baseUV * 0.7 + float2(0.43, 0.27) - windPan * 0.35 + churnShift2).r;
-                float2 warpedUV = baseUV + float2(warp1 - 0.5, warp2 - 0.5) * 0.62 + windPan;
+                float2 moonLightStep = normalize(moonDir.xz + float2(0.0001, 0.0001)) * 0.038;
 
-                float nMacro = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, warpedUV * 0.65).r;
-                float nMid   = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, warpedUV * 1.55 + float2(0.31, 0.19)).r;
-                float nMicro = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, warpedUV * 3.30 - float2(0.18, 0.44)).r;
+                float accumDensity = 0.0;
+                half3 accumColor = half3(0.0, 0.0, 0.0);
+                float accumBillow = 0.0;
 
-                float fbm = nMacro * 0.50 + nMid * 0.35 + nMicro * 0.15;
-                // Billow shaping: rounded thunderhead domes and pinched dark valleys
-                float billow = 1.0 - abs(nMid * 2.0 - 1.0);
-                float cloudCombined = fbm * 0.72 + billow * 0.28;
-
-                // Threshold & density
-                float threshold = 1.0 - _CloudCover;
-                float cloudDensity = smoothstep(threshold - _CloudSoftness, threshold + _CloudSoftness, cloudCombined);
-
-                // Silver-lining & 3D edge highlight
-                float edgeRim = smoothstep(0.10, 0.65, cloudDensity) * (1.0 - smoothstep(0.65, 0.98, cloudDensity));
-                float billowHighlight = pow(saturate(billow * 1.2), 2.0);
-
-                // Directional ambient scattering
                 Light mainLight = GetMainLight();
                 float3 lightDir = normalize(mainLight.direction);
                 float lightScatter = pow(saturate(dot(dir, -lightDir) * 0.5 + 0.5), 3.0);
+                float moonScatter = pow(saturate(moonDot), 6.0) * 0.65 + pow(saturate(moonDot), 36.0) * 1.45;
 
-                // Tonal grading of storm deck
-                half3 cloudTone = lerp(_CloudDarkColor.rgb, _CloudMidColor.rgb, saturate(cloudDensity * 1.25));
-                half3 highlightTone = _CloudLightColor.rgb * (half)(1.0 + lightScatter * 0.65);
-                cloudTone = lerp(cloudTone, highlightTone, saturate(edgeRim * 0.85 + billowHighlight * 0.45));
+                [unroll]
+                for (int i = 0; i < SLICE_COUNT; i++)
+                {
+                    float h = (float)i / (SLICE_COUNT - 1); // 0 = dark storm base, 1 = upper anvil/top
+                    float parallaxScale = 1.0 + (0.5 - h) * _CloudParallaxDepth;
+                    float2 sliceUV = baseUV * parallaxScale + windDir * (h * 0.012);
+
+                    float sliceBillow;
+                    float d = SampleCloudDensity(sliceUV, windPan, churn, sliceBillow);
+
+                    // Directional self-shadowing toward the moon
+                    float shadowBillow;
+                    float dShadow = SampleCloudDensity(sliceUV + moonLightStep * (1.0 - h * 0.5), windPan, churn, shadowBillow);
+                    float lightTrans = exp(-dShadow * 1.85);
+
+                    // Height-graded cloud lighting: dark heavy underbelly -> silver-lined upper ridges
+                    float heightLit = lerp(0.18, 1.0, h);
+                    half3 sliceTone = lerp(_CloudDarkColor.rgb, _CloudMidColor.rgb, saturate(heightLit * 0.85 + d * 0.35));
+
+                    float silverRim = saturate((1.0 - d * 0.65) * lightTrans * (0.45 + h * 0.55));
+                    half3 highlightTone = _CloudLightColor.rgb * (half)(1.0 + lightScatter * 0.55);
+                    sliceTone = lerp(sliceTone, highlightTone, saturate(silverRim * 0.78 + sliceBillow * h * 0.35));
+
+                    // Moonlight forward-scattering / silver lining through thin cloud edges
+                    half3 moonCloudGlow = _MoonColor.rgb * (half)(moonScatter * lightTrans * (1.0 - d * 0.55) * _MoonHaloIntensity * 0.65);
+                    sliceTone += moonCloudGlow;
+
+                    float sliceWeight = d * (1.0 - accumDensity) * 0.52;
+                    accumColor += sliceTone * (half)sliceWeight;
+                    accumDensity = saturate(accumDensity + sliceWeight);
+                    accumBillow += sliceBillow * sliceWeight;
+                }
+
+                float cloudDensity = accumDensity;
+                half3 cloudTone = accumColor / (half)max(cloudDensity, 0.001);
+
+                // --- Internal Lightning Volumetric Illumination ---
+                half3 lightningColor = half3(0.52h, 0.74h, 1.0h);
+                half3 lightningEmissive = lightningColor * (half)(_GlobalLightningFlash * (0.35 + cloudDensity * 0.85 + accumBillow * 1.1));
+                cloudTone += lightningEmissive;
 
                 // --- Layer 2: Fast-moving Low Scud Clouds (Ragged torn shreds rushing beneath deck) ---
                 float2 scudPan = windDir * (t * windSpeed * 0.0032 * cloudSpeedFactor * _ScudSpeedMultiplier);
@@ -144,20 +216,20 @@ Shader "PacificRim/StormSkybox"
                 float scudCombined = scudN1 * 0.65 + scudN2 * 0.35;
                 float scudDensity = smoothstep(0.52, 0.78, scudCombined) * smoothstep(0.04, 0.38, dir.y);
 
-                // --- Internal Lightning Volumetric Illumination ---
-                half3 lightningColor = half3(0.52h, 0.74h, 1.0h);
-                half3 lightningEmissive = lightningColor * (half)(_GlobalLightningFlash * (0.35 + cloudDensity * 0.85 + edgeRim * 1.2));
-                cloudTone += lightningEmissive;
-
                 // Horizon fade
                 float horizonFade = smoothstep(0.02, 0.22, dir.y);
 
-                // Composite main deck onto sky
-                half3 col = lerp(skyBase, cloudTone, saturate(cloudDensity * horizonFade * 0.95));
+                // Composite volumetric cloud deck onto sky (hiding moon behind thick clouds)
+                half3 col = lerp(skyBase, cloudTone, saturate(cloudDensity * horizonFade * 0.96));
 
-                // Composite low scuds in front of the illuminated cloud deck
-                half3 scudTone = _ScudCloudColor.rgb + lightningEmissive * 0.4h;
-                col = lerp(col, scudTone, saturate(scudDensity * 0.85));
+                // Diffused moon corona bleeding through moderately thin cloud cover
+                float cloudDiffusedGlow = pow(saturate(moonDot), 18.0) * saturate(1.0 - cloudDensity * 0.45) * cloudDensity * _MoonHaloIntensity * 0.55 * moonHorizonMask;
+                col += _MoonColor.rgb * (half)cloudDiffusedGlow;
+
+                // Composite low scuds in front of the cloud deck & moon
+                half3 scudRim = _MoonColor.rgb * (half)(pow(saturate(moonDot), 10.0) * (1.0 - scudDensity * 0.6) * _MoonHaloIntensity * 0.35);
+                half3 scudTone = _ScudCloudColor.rgb + lightningEmissive * 0.4h + scudRim;
+                col = lerp(col, scudTone, saturate(scudDensity * 0.88));
 
                 // Seamless blend into dark slate horizon fog
                 col = lerp(_HorizonColor.rgb, col, smoothstep(-0.02, 0.12, dir.y));
