@@ -12,8 +12,11 @@ namespace PacificRimUI.Editor
     public static class SetupPacificRimMainMenuScene
     {
         public const string MainMenuScenePath = "Assets/Scenes/MainMenuScene.unity";
-        public const string GameplayScenePath = "Assets/Scenes/SampleScene.unity";
-        public const string GameplaySceneName = "SampleScene";
+        public const string Level1ScenePath = "Assets/Scenes/Save Striker Eureka.unity";
+        public const string Level2ScenePath = "Assets/Scenes/Operation Pitfall.unity";
+        public const string Level2CutsceneScenePath = "Assets/Scenes/Operation Pitfall Cutscene.unity";
+        public const string GameplayScenePath = Level1ScenePath;
+        public const string GameplaySceneName = MainMenuUI.Level1SceneName;
         public const string MainMenuSceneName = "MainMenuScene";
 
         [MenuItem("Pacific Rim/Setup Dedicated Main Menu Scene", false, 1)]
@@ -220,7 +223,8 @@ namespace PacificRimUI.Editor
             }
         }
 
-        private static void SetupMainMenuCanvasUI()
+        [MenuItem("Pacific Rim/Rebuild Main Menu UI Only", false, 2)]
+        public static void SetupMainMenuCanvasUI()
         {
             SetupPacificRimUIScene.EnsureEventSystem();
             SetupPacificRimUIScene.EnsureSoundManager();
@@ -245,10 +249,18 @@ namespace PacificRimUI.Editor
             var scenes = new List<EditorBuildSettingsScene>
             {
                 new EditorBuildSettingsScene(MainMenuScenePath, true),
-                new EditorBuildSettingsScene(GameplayScenePath, true)
+                new EditorBuildSettingsScene(Level1ScenePath, true)
             };
+            if (System.IO.File.Exists(Level2CutsceneScenePath))
+            {
+                scenes.Add(new EditorBuildSettingsScene(Level2CutsceneScenePath, true));
+            }
+            if (System.IO.File.Exists(Level2ScenePath))
+            {
+                scenes.Add(new EditorBuildSettingsScene(Level2ScenePath, true));
+            }
             EditorBuildSettings.scenes = scenes.ToArray();
-            Debug.Log("[PacificRimUI] Build Settings updated: [0] MainMenuScene, [1] SampleScene.");
+            Debug.Log("[PacificRimUI] Build Settings updated with MainMenuScene, Save Striker Eureka, Operation Pitfall Cutscene, and Operation Pitfall.");
         }
 
         public static void ConfigureSampleSceneUI()

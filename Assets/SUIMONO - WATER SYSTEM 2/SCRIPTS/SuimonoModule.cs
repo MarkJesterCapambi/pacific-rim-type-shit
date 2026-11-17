@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -230,11 +230,11 @@ namespace Suimono.Core
 		public int t;
 		public int y;
 		#if UNITY_EDITOR
-			public SerializedProperty layerTP;
-			public SerializedProperty layerWP;
-			public SerializedProperty layerSP;
-			public SerializedProperty layerXP;
-			public SerializedProperty layerN;
+			[System.NonSerialized] public SerializedProperty layerTP;
+			[System.NonSerialized] public SerializedProperty layerWP;
+			[System.NonSerialized] public SerializedProperty layerSP;
+			[System.NonSerialized] public SerializedProperty layerXP;
+			[System.NonSerialized] public SerializedProperty layerN;
 		#endif
 
 		public Vector3 dir;

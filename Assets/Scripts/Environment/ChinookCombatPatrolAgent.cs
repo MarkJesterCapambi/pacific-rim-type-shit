@@ -133,6 +133,11 @@ namespace PacificRimEnvironment
             {
                 rotorAudioSource = GetComponent<AudioSource>();
             }
+            if (Application.isPlaying && rotorAudioSource != null)
+            {
+                float sfxVol = PacificRimAudio.PacificRimAudioManager.Instance != null ? PacificRimAudio.PacificRimAudioManager.Instance.SfxVolume : 0.55f;
+                rotorAudioSource.volume = 0.16f * sfxVol;
+            }
         }
 
         public void BeginTransitionTo(Transform newTarget, ChinookTargetType newType, float newRadius, float newAltitude)

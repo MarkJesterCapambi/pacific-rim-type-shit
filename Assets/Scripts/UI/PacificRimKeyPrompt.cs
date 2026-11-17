@@ -20,7 +20,7 @@ namespace PacificRimUI
             if (keyLabel != null)
             {
                 keyLabel.supportRichText = true;
-                keyLabel.text = PacificRimUITheme.Track(key, 1, Mathf.Max(11, keyLabel.fontSize), true);
+                keyLabel.text = key;
             }
             if (actionLabel != null)
             {
@@ -36,8 +36,8 @@ namespace PacificRimUI
             Color accent = highlightColor ?? PacificRimUITheme.BlueBright;
 
             Color boxFill = active
-                ? new Color(accent.r, accent.g, accent.b, 0.25f)
-                : new Color(8f / 255f, 12f / 255f, 18f / 255f, 0.55f);
+                ? new Color(accent.r, accent.g, accent.b, 0.28f)
+                : new Color(8f / 255f, 12f / 255f, 18f / 255f, 0.72f);
             Color boxBorder = active ? accent : PacificRimUITheme.Line;
 
             if (keyBoxGraphic != null)
@@ -47,10 +47,10 @@ namespace PacificRimUI
                 circleOutline.SetColors(boxFill, boxBorder);
 
             if (keyLabel != null)
-                keyLabel.color = active ? accent : PacificRimUITheme.Text;
+                keyLabel.color = PacificRimUITheme.Text;
 
             if (actionLabel != null)
-                actionLabel.color = active ? PacificRimUITheme.Text : PacificRimUITheme.TextDim;
+                actionLabel.color = active ? accent : PacificRimUITheme.TextDim;
         }
     }
 }

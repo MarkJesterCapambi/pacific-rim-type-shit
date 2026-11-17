@@ -29,6 +29,11 @@ namespace PacificRimWater
         [Tooltip("Chance a falling droplet leaves a bubble/foam speck where it re-enters the sea.")]
         [Range(0f, 1f)]
         public float dropletImpactFoamChance = 0.35f;
+        [Tooltip("When true (or when WaterSystem is absent), emits sandy seabed silt plumes and rising bubbles instead of surface splashes.")]
+        public bool isDeepUnderwaterMode = false;
+
+        public bool IsDeepUnderwater => isDeepUnderwaterMode || WaterSystem.Instance == null;
+        private bool appliedUnderwaterSiltTint;
 
         private ParticleSystem droplets;
         private ParticleSystem mist;
@@ -72,7 +77,14 @@ namespace PacificRimWater
 
         private void EnsureSystems()
         {
-            if (built && droplets != null && mist != null && foam != null && bubbles != null && sparks != null && volumetricMist != null) return;
+            if (built && droplets != null && mist != null && foam != null && bubbles != null && sparks != null && volumetricMist != null)
+            {
+                if (IsDeepUnderwater && !appliedUnderwaterSiltTint)
+                {
+                    UpdateUnderwaterSiltTint();
+                }
+                return;
+            }
 
             // Remove any legacy single-system child created by older versions
             for (int i = transform.childCount - 1; i >= 0; i--)
@@ -137,6 +149,27 @@ namespace PacificRimWater
             rotOverLife.z = new ParticleSystem.MinMaxCurve(-0.25f, 0.25f);
 
             built = true;
+            if (IsDeepUnderwater)
+            {
+                UpdateUnderwaterSiltTint();
+            }
+        }
+
+        private void UpdateUnderwaterSiltTint()
+        {
+            appliedUnderwaterSiltTint = true;
+            ApplyParticleMaterialTint(mist, new Color(0.24f, 0.27f, 0.30f, 0.58f), 0.75f);
+            ApplyParticleMaterialTint(volumetricMist, new Color(0.26f, 0.29f, 0.32f, 0.28f), 0.90f);
+        }
+
+        private static void ApplyParticleMaterialTint(ParticleSystem ps, Color tint, float lightInfluence)
+        {
+            if (ps == null) return;
+            var r = ps.GetComponent<ParticleSystemRenderer>();
+            if (r == null || r.sharedMaterial == null) return;
+            if (r.sharedMaterial.HasProperty("_TintColor")) r.sharedMaterial.SetColor("_TintColor", tint);
+            else r.sharedMaterial.color = tint;
+            if (r.sharedMaterial.HasProperty("_LightInfluence")) r.sharedMaterial.SetFloat("_LightInfluence", lightInfluence);
         }
 
         private Material MakeMaterial(string matName, Texture2D tex, Color tint, float invFade, float lightInfluence)
@@ -334,12 +367,27 @@ namespace PacificRimWater
                 Vector3 pos = buf[i].position;
                 Vector3 vel = buf[i].velocity;
 
-                vel.y = 0f;
+                if (water != null)
+                {
+                    vel.y = 0f;
+                    pos.y = water.GetWaterHeight(pos) + yOffset;
+                }
+                else if (ps == bubbles && IsDeepUnderwater)
+                {
+                    float sway = Mathf.Sin(Time.time * 3.8f + pos.x * 0.7f + pos.z * 0.5f);
+                    float swayZ = Mathf.Cos(Time.time * 3.2f + pos.z * 0.8f - pos.x * 0.4f);
+                    pos.y += (2.8f + (i % 5) * 0.55f) * Time.deltaTime;
+                    pos.x += sway * 0.55f * Time.deltaTime;
+                    pos.z += swayZ * 0.55f * Time.deltaTime;
+                }
+                else
+                {
+                    vel.y = 0f;
+                }
                 vel.x *= damp;
                 vel.z *= damp;
 
-                if (water != null) pos.y = water.GetWaterHeight(pos) + yOffset;
-                JaegerSplashClipGuard.PushOutAll(ref pos, ref vel, true);
+                JaegerSplashClipGuard.PushOutAll(ref pos, ref vel, water != null);
 
                 buf[i].position = pos;
                 buf[i].velocity = vel;
@@ -378,7 +426,7 @@ namespace PacificRimWater
             emit.position = pos;
             emit.velocity = vel;
             emit.startSize = size;
-            emit.startLifetime = Random.Range(1.5f, 2.6f);
+            emit.startLifetime = IsDeepUnderwater ? Random.Range(4.2f, 6.8f) : Random.Range(1.5f, 2.6f);
             emit.startColor = new Color(1f, 1f, 1f, alpha);
             emit.rotation = Random.Range(0f, 360f);
             mist.Emit(emit, 1);
@@ -415,8 +463,8 @@ namespace PacificRimWater
 
         private void EmitBubble(Vector3 pos, float size, Vector3 vel)
         {
-            vel.y = 0f;
-            JaegerSplashClipGuard.PushOutAll(ref pos, ref vel, true);
+            if (!IsDeepUnderwater) vel.y = 0f;
+            JaegerSplashClipGuard.PushOutAll(ref pos, ref vel, !IsDeepUnderwater);
 
             emit.position = pos;
             emit.velocity = vel;
@@ -432,6 +480,44 @@ namespace PacificRimWater
         #endregion
 
         #region Public Spawn API
+
+        /// <summary>
+        /// Continuously called while moving deep underwater (e.g. Operation Pitfall)
+        /// to emit realistic micro-to-medium cavitation bubble trails behind both legs.
+        /// </summary>
+        public void SpawnUnderwaterWakeBubbles(Vector3 leftFootPos, Vector3 rightFootPos, Vector3 moveVelocity, float speed)
+        {
+            if (float.IsNaN(leftFootPos.x) || float.IsNaN(rightFootPos.x)) return;
+            EnsureSystems();
+
+            Vector3 moveDir = new Vector3(moveVelocity.x, 0f, moveVelocity.z);
+            float hSpeed = moveDir.magnitude;
+            if (hSpeed > 0.05f) moveDir /= hSpeed;
+            else moveDir = transform.forward;
+
+            Vector3 backDir = -moveDir;
+            Vector3 sideDir = Vector3.Cross(Vector3.up, moveDir);
+            float speedFactor = Mathf.Clamp(speed / 10.0f, 0.6f, 1.8f);
+
+            int perLegCount = Mathf.RoundToInt(Random.Range(7, 12) * speedFactor);
+            for (int leg = 0; leg < 2; leg++)
+            {
+                Vector3 basePos = leg == 0 ? leftFootPos : rightFootPos;
+                for (int i = 0; i < perLegCount; i++)
+                {
+                    bool isMicro = Random.value < 0.72f;
+                    Vector3 pos = basePos
+                        + backDir * Random.Range(0.2f, 3.2f)
+                        + sideDir * Random.Range(-1.8f, 1.8f)
+                        + Vector3.up * Random.Range(0.2f, 5.5f);
+                    Vector3 vel = backDir * Random.Range(0.5f, 2.4f)
+                        + sideDir * Random.Range(-1.2f, 1.2f)
+                        + Vector3.up * Random.Range(1.8f, 5.2f);
+                    float sz = isMicro ? Random.Range(0.05f, 0.16f) : Random.Range(0.17f, 0.34f);
+                    EmitBubble(pos, sz * Mathf.Lerp(0.85f, 1.25f, speedFactor * 0.5f), vel);
+                }
+            }
+        }
 
         /// <summary>
         /// Continuously called while the Jaeger wades through ocean water to leave a wide,
@@ -510,6 +596,42 @@ namespace PacificRimWater
 
             scale = Mathf.Clamp(scale, 0.35f, 2.0f);
             float sizeBias = Mathf.Lerp(0.85f, 1.35f, Mathf.Clamp01(scale / 2f));
+
+            if (IsDeepUnderwater)
+            {
+                int siltCount = 14 + Mathf.RoundToInt(10f * scale);
+                for (int i = 0; i < siltCount; i++)
+                {
+                    Vector3 off = Flat(Random.insideUnitCircle * splashSpread * 0.85f * scale);
+                    Vector3 vel = new Vector3(off.x, 0f, off.z) * 1.15f + Vector3.up * Random.Range(1.6f, 4.2f) * scale;
+                    EmitMist(position + off + Vector3.up * 0.35f, vel, Random.Range(7.5f, 15.0f) * scale, Random.Range(0.42f, 0.66f));
+                }
+
+                int underwaterVolCount = 16 + Mathf.RoundToInt(12f * scale);
+                float underwaterSpread = splashSpread * 1.1f * scale;
+                for (int i = 0; i < underwaterVolCount; i++)
+                {
+                    float ang = Random.Range(0f, Mathf.PI * 2f);
+                    Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                    float dist = Random.Range(0.2f, 1.35f) * underwaterSpread;
+                    Vector3 pos = position + radial * dist + Vector3.up * Random.Range(0.2f, 1.6f);
+                    Vector3 vel = radial * (Random.Range(3.0f, 7.2f) * scale) + Vector3.up * (Random.Range(1.8f, 4.6f) * scale);
+                    EmitVolumetricMist(pos, vel, Random.Range(11.0f, 22.0f) * scale, Random.Range(0.24f, 0.42f), Random.Range(5.0f, 8.2f));
+                }
+
+                int underwaterBubbleCount = 28 + Mathf.RoundToInt(24f * scale);
+                for (int i = 0; i < underwaterBubbleCount; i++)
+                {
+                    bool isMicro = i % 3 != 0;
+                    float ang = Random.Range(0f, Mathf.PI * 2f);
+                    Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                    float r0 = Random.Range(0.2f, 2.8f) * splashSpread * 0.65f * scale;
+                    Vector3 bubbleVel = radial * Random.Range(0.9f, 3.4f) + Vector3.up * Random.Range(1.8f, 6.4f);
+                    float sz = isMicro ? Random.Range(0.05f, 0.16f) : Random.Range(0.18f, 0.40f);
+                    EmitBubble(position + radial * r0 + Vector3.up * Random.Range(0.15f, 1.8f), sz * sizeBias, bubbleVel);
+                }
+                return;
+            }
 
             int crown = Mathf.RoundToInt(splashParticleCount * scale);
             for (int i = 0; i < crown; i++)
@@ -598,6 +720,36 @@ namespace PacificRimWater
                 surfacePos.y = WaterSystem.Instance.GetWaterHeight(origin);
             }
 
+            if (IsDeepUnderwater)
+            {
+                int siltPuffs = isHeavy ? 28 : 16;
+                for (int i = 0; i < siltPuffs; i++)
+                {
+                    Vector3 off = forward * Random.Range(0.5f, 7.5f) + right * Random.Range(-4.5f, 4.5f) + Vector3.up * Random.Range(0.4f, 2.0f);
+                    Vector3 vel = forward * Random.Range(3.5f, 9.5f) + right * Random.Range(-2.5f, 2.5f) + Vector3.up * Random.Range(2.5f, 6.2f);
+                    EmitMist(surfacePos + off, vel, Random.Range(8.5f, 18.0f) * clampedIntensity, Random.Range(0.46f, 0.74f));
+                }
+
+                int volCount = isHeavy ? 30 : 18;
+                for (int i = 0; i < volCount; i++)
+                {
+                    Vector3 off = forward * Random.Range(0.5f, 10.5f) + right * Random.Range(-5.5f, 5.5f) + Vector3.up * Random.Range(0.3f, 2.2f);
+                    Vector3 vel = forward * Random.Range(4.5f, 13.0f) + right * Random.Range(-3.0f, 3.0f) + Vector3.up * Random.Range(2.6f, 6.8f);
+                    EmitVolumetricMist(surfacePos + off, vel, Random.Range(14.0f, 28.0f) * clampedIntensity, Random.Range(0.28f, 0.46f), Random.Range(5.8f, 9.2f));
+                }
+
+                int cavBubbles = isHeavy ? 78 : 42;
+                for (int i = 0; i < cavBubbles; i++)
+                {
+                    bool isMicro = i % 3 != 0;
+                    Vector3 off = forward * Random.Range(-1.5f, 9f) + right * Random.Range(-5f, 5f) + Vector3.up * Random.Range(0.2f, 4.5f);
+                    Vector3 vel = forward * Random.Range(2f, 8.5f) + right * Random.Range(-3.5f, 3.5f) + Vector3.up * Random.Range(2.4f, 8.2f);
+                    float sz = isMicro ? Random.Range(0.05f, 0.18f) : Random.Range(0.18f, 0.44f);
+                    EmitBubble(surfacePos + off, sz * clampedIntensity, vel);
+                }
+                return;
+            }
+
             int dropCount = isHeavy ? Mathf.RoundToInt(95 * clampedIntensity) : Mathf.RoundToInt(50 * clampedIntensity);
             float baseUp = isHeavy ? (splashUpwardForce * 2.1f) : (splashUpwardForce * 1.45f);
             float baseForward = isHeavy ? 18.0f : 12.0f;
@@ -668,6 +820,40 @@ namespace PacificRimWater
             if (WaterSystem.Instance != null)
             {
                 surfacePos.y = WaterSystem.Instance.GetWaterHeight(impactPoint);
+            }
+
+            if (IsDeepUnderwater)
+            {
+                for (int i = 0; i < 36; i++)
+                {
+                    float ang = Random.Range(0f, Mathf.PI * 2f);
+                    Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                    Vector3 off = radial * Random.Range(1f, 10.5f) + Vector3.up * Random.Range(0.4f, 2.5f);
+                    Vector3 vel = radial * Random.Range(3.5f, 10.5f) + Vector3.up * Random.Range(3.5f, 8.5f);
+                    EmitMist(surfacePos + off, vel, Random.Range(8.5f, 18.0f), Random.Range(0.48f, 0.78f));
+                }
+
+                for (int i = 0; i < 48; i++)
+                {
+                    float ang = Random.Range(0f, Mathf.PI * 2f);
+                    Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                    float r = Random.Range(0.8f, 22.0f);
+                    Vector3 pos = surfacePos + radial * r + Vector3.up * Random.Range(0.3f, 3.2f);
+                    Vector3 vel = radial * Random.Range(6.5f, 16.5f) + Vector3.up * Random.Range(3.5f, 10.5f);
+                    EmitVolumetricMist(pos, vel, Random.Range(12.0f, 24.0f), Random.Range(0.26f, 0.45f), Random.Range(4.4f, 7.0f));
+                }
+
+                for (int i = 0; i < 135; i++)
+                {
+                    bool isMicro = i % 3 != 0;
+                    float ang = Random.Range(0f, Mathf.PI * 2f);
+                    Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                    float r0 = Random.Range(0.4f, 11.5f);
+                    Vector3 bubbleVel = radial * Random.Range(1.4f, 6.2f) + Vector3.up * Random.Range(2.8f, 9.2f);
+                    float sz = isMicro ? Random.Range(0.06f, 0.22f) : Random.Range(0.24f, 0.58f);
+                    EmitBubble(surfacePos + radial * r0 + Vector3.up * Random.Range(0.1f, 2.2f), sz, bubbleVel);
+                }
+                return;
             }
 
             // 1. Massive 360-degree droplet eruption (240 droplets flying up to 28m high and radially outward)
@@ -1025,13 +1211,18 @@ namespace PacificRimWater
         {
             if (bubble == null)
             {
-                bubble = Build("SplashBubble", 64, (u, v, r) =>
+                // Realistic thin-rim refractive deep-sea bubble (no chunky cartoon ring or giant polka-dot)
+                bubble = Build("SplashBubble", 128, (u, v, r) =>
                 {
-                    float ring = Smooth(0.60f, 0.80f, r) * Smooth(1.0f, 0.86f, r);
-                    float fill = 0.10f * (1f - Smooth(0f, 0.85f, r));
-                    float hu = u + 0.38f, hv = v - 0.38f;
-                    float hl = Smooth(0.24f, 0.05f, Mathf.Sqrt(hu * hu + hv * hv));
-                    return ring * 0.85f + fill + hl * 0.9f;
+                    float rim = Mathf.Exp(-Mathf.Pow((r - 0.84f) / 0.095f, 2f)) * 0.56f;
+                    float outerSoft = Smooth(1.0f, 0.78f, r);
+                    float interior = 0.045f * (1f - Smooth(0.0f, 0.88f, r));
+                    // Subtle upper-left crescent caustic refraction instead of a solid dot
+                    float angle = Mathf.Atan2(v, u);
+                    float crescent = Mathf.Pow(Mathf.Clamp01(Mathf.Cos(angle - 2.35f)), 4.0f) * Mathf.Exp(-Mathf.Pow((r - 0.66f) / 0.14f, 2f)) * 0.34f;
+                    float glintDist = Mathf.Sqrt((u + 0.34f) * (u + 0.34f) + (v - 0.34f) * (v - 0.34f));
+                    float glint = Smooth(0.11f, 0.02f, glintDist) * 0.28f;
+                    return (rim + interior + crescent + glint) * outerSoft;
                 });
             }
             return bubble;

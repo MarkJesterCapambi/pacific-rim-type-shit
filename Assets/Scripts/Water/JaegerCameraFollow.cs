@@ -7,6 +7,7 @@ namespace PacificRimWater
     /// Operates in LateUpdate to eliminate physics jitter and avoids non-uniform scale inheritance.
     /// Fully compatible with both the New Input System and Legacy Input Manager.
     /// </summary>
+    [DefaultExecutionOrder(50)]
     public class JaegerCameraFollow : MonoBehaviour
     {
         public static JaegerCameraFollow Instance { get; private set; }
@@ -135,7 +136,7 @@ namespace PacificRimWater
 
         void LateUpdate()
         {
-            if (PacificRimUI.MainMenuUI.IsMenuOpen)
+            if (PacificRimUI.MainMenuUI.IsMenuOpen || PacificRimUI.PacificRimAdminUI.IsOpen)
             {
                 if (Cursor.lockState != CursorLockMode.None)
                 {
@@ -161,7 +162,7 @@ namespace PacificRimWater
             }
 
             // Freecam toggle via 'E' key
-            if (!PacificRimUI.MainMenuUI.IsMenuOpen && WasFreeCamTogglePressedThisFrame())
+            if (!PacificRimUI.MainMenuUI.IsMenuOpen && !PacificRimUI.PacificRimAdminUI.IsOpen && !PacificRimUI.JaegerHUD.SuppressFreeCamThisFrame && WasFreeCamTogglePressedThisFrame())
             {
                 ToggleFreeCam();
             }
@@ -241,12 +242,18 @@ namespace PacificRimWater
                 }
             }
 
-            // Sprint-heavy jump attack dynamic camera zoom out
-            bool isSprintAttacking = !isFreeCam && SimpleJaegerController.Instance != null && SimpleJaegerController.Instance.IsSprintAttacking;
-            float targetExtraDist = isSprintAttacking ? attackZoomExtraDistance : 0f;
-            float targetExtraFov = isSprintAttacking ? attackZoomExtraFOV : 0f;
-            currentAttackExtraDist = Mathf.Lerp(currentAttackExtraDist, targetExtraDist, Time.deltaTime * (isSprintAttacking ? 5.5f : 3.0f));
-            currentAttackExtraFov = Mathf.Lerp(currentAttackExtraFov, targetExtraFov, Time.deltaTime * (isSprintAttacking ? 5.5f : 3.0f));
+            // Sprint-heavy jump attack & I-19 Plasmacaster dynamic camera framing
+            var jaegerCtrl = SimpleJaegerController.Instance;
+            bool isSprintAttacking = !isFreeCam && jaegerCtrl != null && jaegerCtrl.IsSprintAttacking;
+            bool isPlasmaCharging = !isFreeCam && jaegerCtrl != null && jaegerCtrl.IsPlasmaCharging;
+            bool isPlasmaRecoil = !isFreeCam && jaegerCtrl != null && jaegerCtrl.IsPlasmaRecoil;
+            float targetExtraDist = isSprintAttacking ? attackZoomExtraDistance : (isPlasmaCharging ? -2.2f * jaegerCtrl.PlasmaChargeProgress : 0f);
+            float targetExtraFov = isSprintAttacking ? attackZoomExtraFOV
+                : (isPlasmaCharging ? -3.6f * jaegerCtrl.PlasmaChargeProgress
+                : (isPlasmaRecoil ? 2.4f : 0f));
+            float zoomRate = (isSprintAttacking || isPlasmaRecoil) ? 7.5f : (isPlasmaCharging ? 4.5f : 3.0f);
+            currentAttackExtraDist = Mathf.Lerp(currentAttackExtraDist, targetExtraDist, Time.deltaTime * zoomRate);
+            currentAttackExtraFov = Mathf.Lerp(currentAttackExtraFov, targetExtraFov, Time.deltaTime * zoomRate);
 
             if (cam != null && activeCutsceneTransition == null)
             {
@@ -267,6 +274,10 @@ namespace PacificRimWater
                 {
                     float minCameraY = WaterSystem.Instance.transform.position.y + 2.2f;
                     desiredPosition.y = Mathf.Max(desiredPosition.y, minCameraY);
+                }
+                else
+                {
+                    desiredPosition.y = Mathf.Max(desiredPosition.y, 1.5f);
                 }
             }
             else

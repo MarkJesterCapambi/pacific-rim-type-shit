@@ -62,13 +62,13 @@ namespace PacificRimWater
             {
                 main.maxParticles = 20000;
             }
-            // Thin, atmospheric storm streaks that stay visible without obscuring combat
-            main.startSize = new ParticleSystem.MinMaxCurve(0.065f, 0.115f);
-            main.startColor = new Color(0.86f, 0.92f, 1.0f, 0.44f);
+            // Thin, needle-sharp storm streaks that stay visible without obscuring combat
+            main.startSize = new ParticleSystem.MinMaxCurve(0.030f, 0.052f);
+            main.startColor = new Color(0.86f, 0.92f, 1.0f, 0.30f);
 
             var emission = rainParticles.emission;
             emission.enabled = true;
-            emission.rateOverTime = 4800f;
+            emission.rateOverTime = 2400f;
 
             var shape = rainParticles.shape;
             if (shape.enabled && shape.shapeType == ParticleSystemShapeType.Box)
@@ -81,8 +81,8 @@ namespace PacificRimWater
             {
                 rend.enableGPUInstancing = false;
                 rend.minParticleSize = 0.0012f;
-                rend.velocityScale = 0.055f;
-                rend.lengthScale = 5.5f;
+                rend.velocityScale = 0.075f;
+                rend.lengthScale = 8.5f;
             }
 
             if (Application.isPlaying)

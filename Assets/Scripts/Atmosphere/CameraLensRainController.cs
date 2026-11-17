@@ -8,6 +8,7 @@ namespace PacificRimAtmosphere
     /// Exposes fine-grained intensity controls and only enables the overlay quad in Play Mode.
     /// </summary>
     [ExecuteAlways]
+    [DefaultExecutionOrder(75)]
     public class CameraLensRainController : MonoBehaviour
     {
         [Header("Intensity Controls")]
@@ -46,8 +47,35 @@ namespace PacificRimAtmosphere
         private static readonly int IdDropletIntensity = Shader.PropertyToID("_DropletIntensity");
         private static readonly int IdStreakIntensity = Shader.PropertyToID("_StreakIntensity");
         private static readonly int IdWetAlpha = Shader.PropertyToID("_WetAlpha");
+        private static readonly int IdSplashImpactAmount = Shader.PropertyToID("_SplashImpactAmount");
+        private static readonly int IdSplashImpactAge = Shader.PropertyToID("_SplashImpactAge");
 
         private Camera targetCamera;
+        private float splashImpactPeak = 0f;
+        private float splashImpactAge = 0f;
+        private float splashImpactDuration = 6.5f;
+        private bool hasActiveSplash = false;
+
+        /// <summary>
+        /// Triggers a burst of heavy water droplets splashing onto the camera lens
+        /// that slowly bead and streak down over <paramref name="duration"/> seconds.
+        /// </summary>
+        public void TriggerLensWaterSplash(float intensity = 1.25f, float duration = 7.0f)
+        {
+            splashImpactPeak = Mathf.Clamp(intensity, 0f, 2f);
+            splashImpactDuration = Mathf.Max(0.5f, duration);
+            splashImpactAge = 0f;
+            hasActiveSplash = splashImpactPeak > 0.01f;
+            ApplyProperties();
+        }
+
+        public void ClearLensWaterSplash()
+        {
+            hasActiveSplash = false;
+            splashImpactPeak = 0f;
+            splashImpactAge = 0f;
+            ApplyProperties();
+        }
 
         void OnEnable()
         {
@@ -65,7 +93,21 @@ namespace PacificRimAtmosphere
 
         void Update()
         {
+            if (hasActiveSplash && Application.isPlaying)
+            {
+                splashImpactAge += Time.deltaTime;
+                if (splashImpactAge >= splashImpactDuration)
+                {
+                    hasActiveSplash = false;
+                    splashImpactPeak = 0f;
+                }
+            }
             ApplyProperties();
+            PositionQuadInFrontOfCamera();
+        }
+
+        void LateUpdate()
+        {
             PositionQuadInFrontOfCamera();
         }
 
@@ -135,6 +177,12 @@ namespace PacificRimAtmosphere
             PositionQuadInFrontOfCamera();
         }
 
+        public void ForceSyncNow()
+        {
+            ApplyProperties();
+            PositionQuadInFrontOfCamera();
+        }
+
         private void ApplyProperties()
         {
             float pitchMultiplier = 1.0f;
@@ -153,11 +201,19 @@ namespace PacificRimAtmosphere
                 rainLensMaterial.SetFloat(IdDropletIntensity, dropletDensity * finalIntensity);
                 rainLensMaterial.SetFloat(IdStreakIntensity, downwardStreaksIntensity * finalIntensity);
                 rainLensMaterial.SetFloat(IdWetAlpha, Mathf.Clamp01(baseWetOpacity * finalIntensity));
+
+                float splashFade = hasActiveSplash && Application.isPlaying
+                    ? splashImpactPeak * (1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(splashImpactAge / splashImpactDuration)))
+                    : 0f;
+                if (rainLensMaterial.HasProperty(IdSplashImpactAmount))
+                    rainLensMaterial.SetFloat(IdSplashImpactAmount, splashFade);
+                if (rainLensMaterial.HasProperty(IdSplashImpactAge))
+                    rainLensMaterial.SetFloat(IdSplashImpactAge, splashImpactAge);
             }
 
             if (rainLensQuad != null)
             {
-                bool shouldShow = Application.isPlaying && finalIntensity > 0.01f;
+                bool shouldShow = Application.isPlaying && (finalIntensity > 0.01f || hasActiveSplash);
                 if (rainLensQuad.gameObject.activeSelf != shouldShow)
                 {
                     rainLensQuad.gameObject.SetActive(shouldShow);

@@ -35,8 +35,10 @@ namespace PacificRimAtmosphere
 
         [Header("Dynamic Audio Low-Pass Filter")]
         public bool enableDynamicLowPass = true;
+        public bool isDeepUnderwater = false;
         public AudioLowPassFilter cameraLowPassFilter;
         public float normalCutoffFrequency = 22000f;
+        public float deepUnderwaterCutoff = 3000f;
         public float thunderDeafeningCutoff = 550f;
         public float waterProximityCutoff = 800f;
         public float lowPassRecoverySpeed = 1.85f;
@@ -82,7 +84,6 @@ namespace PacificRimAtmosphere
         private void ScheduleEvents()
         {
             nextSirenTime = Time.time + Random.Range(minSirenInterval * 0.4f, minSirenInterval);
-            nextFoghornTime = Time.time + Random.Range(minFoghornInterval * 0.3f, minFoghornInterval);
             nextMetalTime = Time.time + Random.Range(minMetalCreakInterval * 0.3f, minMetalCreakInterval);
         }
 
@@ -149,7 +150,10 @@ namespace PacificRimAtmosphere
                 {
                     cameraLowPassFilter = cam.gameObject.AddComponent<AudioLowPassFilter>();
                 }
-                cameraLowPassFilter.cutoffFrequency = normalCutoffFrequency;
+                float baseCutoff = isDeepUnderwater ? deepUnderwaterCutoff : normalCutoffFrequency;
+                currentLowPassCutoff = baseCutoff;
+                targetLowPassCutoff = baseCutoff;
+                cameraLowPassFilter.cutoffFrequency = baseCutoff;
             }
         }
 
@@ -157,16 +161,10 @@ namespace PacificRimAtmosphere
         {
             if (!Application.isPlaying) return;
 
-            if (Time.time >= nextSirenTime)
+            if (!isDeepUnderwater && Time.time >= nextSirenTime)
             {
                 PlaySiren();
                 nextSirenTime = Time.time + Random.Range(minSirenInterval, maxSirenInterval);
-            }
-
-            if (Time.time >= nextFoghornTime)
-            {
-                PlayFoghorn();
-                nextFoghornTime = Time.time + Random.Range(minFoghornInterval, maxFoghornInterval);
             }
 
             if (Time.time >= nextMetalTime)
@@ -182,38 +180,40 @@ namespace PacificRimAtmosphere
         {
             if (sirenClip != null && sirenSource != null)
             {
+                float sfxVol = PacificRimAudio.PacificRimAudioManager.Instance != null ? PacificRimAudio.PacificRimAudioManager.Instance.SfxVolume : 0.55f;
                 sirenSource.pitch = Random.Range(0.94f, 1.04f);
-                sirenSource.PlayOneShot(sirenClip, sirenSource.volume);
+                sirenSource.PlayOneShot(sirenClip, 0.12f * sfxVol);
             }
         }
 
         public void PlayFoghorn()
         {
-            if (foghornClip != null && foghornSource != null)
-            {
-                foghornSource.pitch = Random.Range(0.92f, 1.02f);
-                foghornSource.PlayOneShot(foghornClip, foghornSource.volume);
-            }
+            // Foghorn is exclusively triggered by the player's Q emote.
         }
 
         public void PlayMetalCreak()
         {
             if (metalCreakClip != null && metalCreakSource != null)
             {
+                float sfxVol = PacificRimAudio.PacificRimAudioManager.Instance != null ? PacificRimAudio.PacificRimAudioManager.Instance.SfxVolume : 0.55f;
                 metalCreakSource.pitch = Random.Range(0.88f, 1.12f);
-                metalCreakSource.PlayOneShot(metalCreakClip, metalCreakSource.volume);
+                metalCreakSource.PlayOneShot(metalCreakClip, 0.13f * sfxVol);
             }
         }
 
         public void TriggerThunderMuffle(float muffleStrength = 0.85f, float duration = 0.75f)
         {
-            targetLowPassCutoff = Mathf.Lerp(normalCutoffFrequency, thunderDeafeningCutoff, Mathf.Clamp01(muffleStrength));
+            float baseCutoff = isDeepUnderwater ? deepUnderwaterCutoff : normalCutoffFrequency;
+            float floorCutoff = isDeepUnderwater ? 1900f : thunderDeafeningCutoff;
+            targetLowPassCutoff = Mathf.Lerp(baseCutoff, floorCutoff, Mathf.Clamp01(muffleStrength));
             muffleHoldTimer = Mathf.Max(muffleHoldTimer, duration);
         }
 
         public void TriggerSubBassMuffle(float muffleStrength = 0.70f, float duration = 0.60f)
         {
-            targetLowPassCutoff = Mathf.Lerp(normalCutoffFrequency, thunderDeafeningCutoff * 1.35f, Mathf.Clamp01(muffleStrength));
+            float baseCutoff = isDeepUnderwater ? deepUnderwaterCutoff : normalCutoffFrequency;
+            float floorCutoff = isDeepUnderwater ? 1900f : (thunderDeafeningCutoff * 1.35f);
+            targetLowPassCutoff = Mathf.Lerp(baseCutoff, floorCutoff, Mathf.Clamp01(muffleStrength));
             muffleHoldTimer = Mathf.Max(muffleHoldTimer, duration);
         }
 
@@ -224,6 +224,7 @@ namespace PacificRimAtmosphere
             if (cameraLowPassFilter == null) return;
 
             float dt = Time.deltaTime;
+            float baseCutoff = isDeepUnderwater ? deepUnderwaterCutoff : normalCutoffFrequency;
 
             if (muffleHoldTimer > 0f)
             {
@@ -231,11 +232,11 @@ namespace PacificRimAtmosphere
             }
             else
             {
-                targetLowPassCutoff = normalCutoffFrequency;
+                targetLowPassCutoff = baseCutoff;
             }
 
             Camera cam = Camera.main;
-            if (cam != null && WaterSystem.Instance != null)
+            if (!isDeepUnderwater && cam != null && WaterSystem.Instance != null)
             {
                 Vector3 camPos = cam.transform.position;
                 float seaY = WaterSystem.Instance.GetWaterHeight(camPos);

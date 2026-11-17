@@ -42,6 +42,15 @@ namespace PacificRimUI
             SyncInstant();
         }
 
+        public void SetBadge(string text, Color color)
+        {
+            if (badgeText != null)
+            {
+                badgeText.text = text;
+                badgeText.color = color;
+            }
+        }
+
         private void HandleCardClick()
         {
             PacificRimUISound.PlayClick();

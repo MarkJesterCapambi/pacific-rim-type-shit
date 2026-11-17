@@ -231,6 +231,27 @@ namespace PacificRimWater
             if (torsoSpotLightR != null) torsoSpotLightR.range = baseTorsoLightRangeR * multiplier;
         }
 
+        /// <summary>
+        /// Toggles visibility of Gipsy's 3D volumetric light cone meshes while leaving lights intact.
+        /// Used during silhouette-focused cutscene shots so opaque beam meshes do not obscure armor framing.
+        /// </summary>
+        public void SetVolumetricConesVisible(bool visible)
+        {
+            SetConeTransformVisible(headBeamTransform, visible);
+            SetConeTransformVisible(torsoBeamTransformL, visible);
+            SetConeTransformVisible(torsoBeamTransformR, visible);
+        }
+
+        private static void SetConeTransformVisible(Transform coneTransform, bool visible)
+        {
+            if (coneTransform == null) return;
+            var renderers = coneTransform.GetComponentsInChildren<MeshRenderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null) renderers[i].enabled = visible;
+            }
+        }
+
         public Coroutine TweenBeamMultiplier(float from, float to, float duration)
         {
             if (activeCutsceneBeamTween != null)

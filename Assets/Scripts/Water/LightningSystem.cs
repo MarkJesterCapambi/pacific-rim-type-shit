@@ -257,7 +257,8 @@ namespace PacificRimWater
 
                     if (PacificRimAudio.PacificRimAudioManager.Instance != null)
                     {
-                        PacificRimAudio.PacificRimAudioManager.Instance.PlayLightningStrike(center);
+                        // Nature Ambience (Thunderstorm): lowest tier in volume hierarchy
+                        PacificRimAudio.PacificRimAudioManager.Instance.PlayLightningStrike(center, 0.10f);
                     }
                 }
 

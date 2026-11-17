@@ -1,4 +1,3 @@
-using System.Text;
 using UnityEngine;
 
 namespace PacificRimUI
@@ -31,8 +30,8 @@ namespace PacificRimUI
     {
         // Core Colors (translated from UI.Theme)
         public static readonly Color Background       = new Color(6f / 255f, 6f / 255f, 9f / 255f, 1.0f);       // RGB(6, 6, 9)
-        public static readonly Color Panel            = new Color(8f / 255f, 12f / 255f, 18f / 255f, 0.45f);    // Blue-tinted UI.Theme.Panel @ FillTransparency 0.55
-        public static readonly Color PanelOpaque      = new Color(9f / 255f, 12f / 255f, 18f / 255f, 0.92f);    // Modal fill @ 0.08 transparency
+        public static readonly Color Panel            = new Color(8f / 255f, 12f / 255f, 18f / 255f, 0.68f);    // Blue-tinted translucent glass panel
+        public static readonly Color PanelOpaque      = new Color(8f / 255f, 11f / 255f, 17f / 255f, 0.97f);    // Modal / dialog fill (prevents underlying text bleed)
         public static readonly Color Line             = new Color(1.0f, 1.0f, 1.0f, 0.22f);                     // RGB(255,255,255) @ LineTransparency 0.78
         public const float LineTransparency           = 0.78f;
         public const float LineAlpha                  = 0.22f;
@@ -104,27 +103,12 @@ namespace PacificRimUI
         }
 
         /// <summary>
-        /// Equivalent of UI.track(text, amount): Clean, readable uppercase text.
+        /// Formats UI labels with consistent casing without inserting artificial spaces between characters.
         /// </summary>
         public static string Track(string text, int tracking, int baseFontSize = 18, bool upper = true)
         {
             if (string.IsNullOrEmpty(text)) return string.Empty;
-            string s = upper ? text.ToUpperInvariant() : text;
-            if (tracking <= 0) return s;
-
-            // Only add clean single spacing for very large display headers if desired, otherwise return clean text
-            if (tracking >= 2 && s.Length <= 24 && !s.Contains(" ") && !s.Contains("<") && !s.Contains("/"))
-            {
-                var sb = new StringBuilder(s.Length * 2);
-                for (int i = 0; i < s.Length; i++)
-                {
-                    sb.Append(s[i]);
-                    if (i < s.Length - 1) sb.Append(" ");
-                }
-                return sb.ToString();
-            }
-
-            return s;
+            return upper ? text.ToUpperInvariant() : text;
         }
 
         /// <summary>

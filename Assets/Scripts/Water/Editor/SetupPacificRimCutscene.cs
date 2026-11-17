@@ -211,10 +211,13 @@ namespace PacificRimCutscene.Editor
 
             cutscene.chinookPrefab = savedPrefab;
             cutscene.cableMaterial = cableMat;
+            cutscene.volumetricBeamMaterial = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/PacificRim_VolumetricBeam.mat");
+            cutscene.volumetricBeamConeMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Meshes/PacificRim_VolumetricBeamCone.asset");
+            cutscene.spotlightGlareMaterial = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/PacificRim_SpotlightGlare.mat");
             cutscene.ResolveReferences();
 
             EditorUtility.SetDirty(cutsceneGo);
-            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(cutsceneGo.scene);
+            UnityEditor.SceneManagement.EditorSceneManager.SaveScene(cutsceneGo.scene);
 
             Debug.Log("<color=#00e5ff><b>[DeploymentCutscene]</b></color> Successfully created Chinook tactical materials, configured PacificRim_Chinook.prefab, and wired deployment cutscene!");
         }

@@ -24,24 +24,24 @@ namespace PacificRimUI
         private Text percentText;
         private Text statusText;
         private Text tipText;
+        private Text sectorSubText;
         private RectTransform reticleTransform;
 
         private float targetProgress = 0f;
         private float currentDisplayProgress = 0f;
-        private string targetStatus = "INITIALIZING TACTICAL NEURAL HANDSHAKE...";
+        private string targetStatus = "INITIALIZING";
         private float tipTimer = 0f;
         private int currentTipIndex = 0;
 
         private static readonly string[] TacticalTips = new string[]
         {
-            "MARK-III GIPSY DANGER: POWERED BY DUAL NUCLEAR VORTEX TURBINES.",
-            "PERFECT PARRY: TIMED DEFLECTION NEGATES ALL INCOMING DAMAGE AND RESTORES 15% STAMINA.",
-            "SPRINT ATTACK: ROCKET-ASSISTED JUMP SLAM IS UNINTERRUPTIBLE BY ENEMY ATTACKS.",
-            "TACTICAL RETREAT: SPRINTING BACKWARDS ALLOWS RE-POSITIONING AGAINST KAIJU CHARGES.",
-            "ACTUATOR EXHAUSTION: ATTACKING AT ZERO STAMINA TEMPORARILY LOCKS HYDRAULIC SERVOS.",
-            "CATEGORY IV LEATHERBACK: BEWARE BIO-ELECTRIC EMP DISCHARGE IN COMBAT PHASE III.",
-            "MISSION DIRECTIVE: STRIKER EUREKA HAS BEEN DISABLED BY AN ORGANIC EMP WAVE. INTERCEPT LEATHERBACK AT ONCE.",
-            "TITAN SQUADRON: DUAL CHINOOK ROTORCRANE FORMATION DELIVERS JAEGER TO COMBAT DROP SECTOR."
+            "TAP [F] ON IMPACT TO PARRY  ·  0 DMG  ·  +15% STAMINA  ·  STAGGERS KAIJU",
+            "DOUBLE-TAP [W A S D] FOR THRUSTER DASH",
+            "SPRINT + [RMB] FOR UNINTERRUPTIBLE ROCKET LUNGE",
+            "[R] DEPLOYS GD6 CHAIN SWORDS  ·  +DAMAGE & REACH",
+            "[T] FIRES I-19 PLASMACASTER  ·  REQUIRES 70% STAMINA",
+            "[Q] OVERCHARGE  ·  +30% ATTACK SPEED  ·  +25% DMG (15S)",
+            "[E] TOGGLES FREECAM  ·  [~] HIDES HUD"
         };
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -87,13 +87,14 @@ namespace PacificRimUI
 
             // Smooth progress bar interpolation
             currentDisplayProgress = Mathf.MoveTowards(currentDisplayProgress, targetProgress, Time.unscaledDeltaTime * 1.5f);
+            float clamped = Mathf.Clamp01(currentDisplayProgress);
             if (barFill != null)
             {
-                barFill.sizeDelta = new Vector2(744f * Mathf.Clamp01(currentDisplayProgress), 0f);
+                barFill.anchorMax = new Vector2(clamped, 1f);
             }
             if (percentText != null)
             {
-                percentText.text = $"[ {Mathf.RoundToInt(currentDisplayProgress * 100f)}% ]";
+                percentText.text = $"{Mathf.RoundToInt(clamped * 100f)}%";
             }
             if (statusText != null)
             {
@@ -103,7 +104,7 @@ namespace PacificRimUI
             // Smooth tactical reticle rotation
             if (reticleTransform != null)
             {
-                reticleTransform.Rotate(0f, 0f, -42f * Time.unscaledDeltaTime);
+                reticleTransform.Rotate(0f, 0f, -38f * Time.unscaledDeltaTime);
             }
 
             // Cycling tactical tips
@@ -114,7 +115,7 @@ namespace PacificRimUI
                 currentTipIndex = (currentTipIndex + 1) % TacticalTips.Length;
                 if (tipText != null)
                 {
-                    tipText.text = $"\"{TacticalTips[currentTipIndex]}\"";
+                    tipText.text = TacticalTips[currentTipIndex];
                 }
             }
         }
@@ -156,7 +157,16 @@ namespace PacificRimUI
         public void StartLoadingSequence(string sceneName)
         {
             StopAllCoroutines();
-            ShowImmediate("ESTABLISHING DRIFT NETWORK LINK...");
+            if (sectorSubText != null)
+            {
+                if (sceneName.IndexOf("Operation Pitfall", StringComparison.OrdinalIgnoreCase) >= 0)
+                    sectorSubText.text = "SECTOR 09 // MARIANA TRENCH";
+                else if (sceneName.IndexOf("Save Striker Eureka", StringComparison.OrdinalIgnoreCase) >= 0)
+                    sectorSubText.text = "SECTOR 04 // HONG KONG BAY";
+                else
+                    sectorSubText.text = "SHATTERDOME // COMMAND";
+            }
+            ShowImmediate("CONNECTING");
             StartCoroutine(LoadSceneRoutine(sceneName));
         }
 
@@ -184,8 +194,8 @@ namespace PacificRimUI
             }
 
             if (statusText != null) statusText.text = targetStatus;
-            if (percentText != null) percentText.text = "[ 5% ]";
-            if (barFill != null) barFill.sizeDelta = new Vector2(744f * 0.05f, 0f);
+            if (percentText != null) percentText.text = "5%";
+            if (barFill != null) barFill.anchorMax = new Vector2(0.05f, 1f);
 
             Canvas.ForceUpdateCanvases();
         }
@@ -196,7 +206,7 @@ namespace PacificRimUI
             yield return null;
             yield return new WaitForEndOfFrame();
 
-            targetStatus = $"STREAMING SECTOR ASSETS: {sceneName}...";
+            targetStatus = $"LOADING  {sceneName.ToUpperInvariant()}";
             targetProgress = 0.15f;
 
             // Non-blocking asynchronous scene load with staged activation
@@ -207,12 +217,12 @@ namespace PacificRimUI
             {
                 float opProgress = Mathf.Clamp01(asyncOp.progress / 0.9f);
                 targetProgress = Mathf.Lerp(0.15f, 0.58f, opProgress);
-                targetStatus = $"STREAMING SECTOR ASSETS ({Mathf.RoundToInt(opProgress * 100f)}%)...";
+                targetStatus = $"LOADING SECTOR";
                 yield return null;
             }
 
             targetProgress = 0.60f;
-            targetStatus = "INITIALIZING SECTOR HIERARCHY...";
+            targetStatus = "INITIALIZING";
             asyncOp.allowSceneActivation = true;
 
             while (!asyncOp.isDone)
@@ -220,8 +230,8 @@ namespace PacificRimUI
                 yield return null;
             }
 
-            // Once the new scene is active, perform targeted preloading if it's the combat gameplay scene
-            bool isGameplay = sceneName.IndexOf("SampleScene", StringComparison.OrdinalIgnoreCase) >= 0;
+            // Once the new scene is active, perform targeted preloading if it's a combat gameplay scene
+            bool isGameplay = !sceneName.Equals("MainMenuScene", StringComparison.OrdinalIgnoreCase);
             if (isGameplay)
             {
                 yield return StartCoroutine(PreloadMainSceneAssetsRoutine((progress, status) =>
@@ -230,17 +240,26 @@ namespace PacificRimUI
                     targetStatus = status;
                 }));
 
-                // Signal the deployment cutscene to begin with completely pre-warmed assets
+                // Signal either the aerial deployment cutscene (Level 1), Operation Pitfall intro cutscene (Level 2), or the underwater intro
                 var cutscene = FindAnyObjectByType<PacificRimCutscene.PacificRimDeploymentCutscene>();
+                var pitfallCutscene = FindAnyObjectByType<PacificRimCutscene.OperationPitfallIntroCutscene>();
                 if (cutscene != null)
                 {
                     cutscene.StartCutscene();
+                }
+                else if (pitfallCutscene == null)
+                {
+                    var underwaterCtrl = FindAnyObjectByType<PacificRimAtmosphere.UnderwaterEnvironmentController>();
+                    if (underwaterCtrl != null)
+                    {
+                        underwaterCtrl.StartUnderwaterIntro();
+                    }
                 }
             }
             else
             {
                 targetProgress = 1.0f;
-                targetStatus = "DRIFT LINK NOMINAL // RETURNING TO BASE";
+                targetStatus = "READY";
                 yield return new WaitForSecondsRealtime(0.2f);
             }
 
@@ -250,7 +269,7 @@ namespace PacificRimUI
                 yield return null;
             }
             currentDisplayProgress = 1.0f;
-            targetStatus = "NEURAL HANDSHAKE 100% // ALL SYSTEMS NOMINAL";
+            targetStatus = "READY";
             yield return new WaitForSecondsRealtime(0.35f);
 
             // Smooth fade-out of the loading screen
@@ -270,6 +289,15 @@ namespace PacificRimUI
             }
             if (canvas != null) canvas.enabled = false;
             IsLoading = false;
+
+            if (isGameplay)
+            {
+                var pitfallCutscene = FindAnyObjectByType<PacificRimCutscene.OperationPitfallIntroCutscene>();
+                if (pitfallCutscene != null)
+                {
+                    pitfallCutscene.StartCutscene();
+                }
+            }
         }
 
         /// <summary>
@@ -279,10 +307,10 @@ namespace PacificRimUI
         public static IEnumerator PreloadMainSceneAssetsRoutine(Action<float, string> onProgress = null)
         {
             // 1. Scene Material & Shader Touch (60% -> 72%)
-            onProgress?.Invoke(0.72f, "STAGE 1/4: PRE-WARMING GPU SHADERS & OCEAN PIPELINES...");
+            onProgress?.Invoke(0.72f, "WARMING SHADERS");
             yield return null;
 
-            Renderer[] renderers = FindObjectsByType<Renderer>(FindObjectsSortMode.None);
+            Renderer[] renderers = FindObjectsByType<Renderer>();
             for (int i = 0; i < renderers.Length; i++)
             {
                 if (renderers[i] != null)
@@ -301,13 +329,13 @@ namespace PacificRimUI
             yield return null;
 
             // 2. Audio Buffers & Servo Samples (72% -> 82%)
-            onProgress?.Invoke(0.82f, "STAGE 2/4: PRE-CACHING COMBAT AUDIO & HYDRAULIC SERVOS...");
+            onProgress?.Invoke(0.82f, "LOADING AUDIO");
             yield return null;
             if (PacificRimAudio.PacificRimAudioManager.Instance != null)
             {
                 PacificRimAudio.PacificRimAudioManager.Instance.PreloadAllAudioClips();
             }
-            AudioSource[] audioSources = FindObjectsByType<AudioSource>(FindObjectsSortMode.None);
+            AudioSource[] audioSources = FindObjectsByType<AudioSource>();
             for (int i = 0; i < audioSources.Length; i++)
             {
                 if (audioSources[i] != null && audioSources[i].clip != null && audioSources[i].clip.loadState != AudioDataLoadState.Loaded)
@@ -319,9 +347,9 @@ namespace PacificRimUI
             yield return null;
 
             // 3. Particle Systems & VFX Buffers (82% -> 92%)
-            onProgress?.Invoke(0.92f, "STAGE 3/4: PRE-WARMING COMBAT PARTICLES & ATMOSPHERICS...");
+            onProgress?.Invoke(0.92f, "WARMING VFX");
             yield return null;
-            ParticleSystem[] particleSystems = FindObjectsByType<ParticleSystem>(FindObjectsSortMode.None);
+            ParticleSystem[] particleSystems = FindObjectsByType<ParticleSystem>();
             for (int i = 0; i < particleSystems.Length; i++)
             {
                 if (particleSystems[i] != null)
@@ -334,7 +362,7 @@ namespace PacificRimUI
             yield return null;
 
             // 4. Memory Purge, Physics Sync & GC (92% -> 98%)
-            onProgress?.Invoke(0.98f, "STAGE 4/4: PURGING LOAD MEMORY & STABILIZING DRIFT LINK...");
+            onProgress?.Invoke(0.98f, "SYNCING DRIFT");
             yield return null;
             Physics.SyncTransforms();
             Resources.UnloadUnusedAssets();
@@ -345,7 +373,7 @@ namespace PacificRimUI
             yield return new WaitForEndOfFrame();
 
             // 5. Ready (100%)
-            onProgress?.Invoke(1.0f, "NEURAL HANDSHAKE 100% // READY FOR COMBAT DROP");
+            onProgress?.Invoke(1.0f, "READY");
             yield return null;
         }
 
@@ -389,71 +417,73 @@ namespace PacificRimUI
             var topVignette = new GameObject("TopVignette", typeof(RectTransform), typeof(UIGradientGraphic));
             topVignette.transform.SetParent(bgGo.transform, false);
             var topRt = topVignette.GetComponent<RectTransform>();
-            topRt.anchorMin = new Vector2(0f, 0.75f);
+            topRt.anchorMin = new Vector2(0f, 0.78f);
             topRt.anchorMax = Vector2.one;
             topRt.sizeDelta = Vector2.zero;
             var topGrad = topVignette.GetComponent<UIGradientGraphic>();
-            topGrad.SetVertical(new Color(0.02f, 0.05f, 0.12f, 0.65f), Color.clear);
+            topGrad.SetVertical(new Color(0.02f, 0.05f, 0.12f, 0.55f), Color.clear);
             topGrad.raycastTarget = false;
 
             var botVignette = new GameObject("BottomVignette", typeof(RectTransform), typeof(UIGradientGraphic));
             botVignette.transform.SetParent(bgGo.transform, false);
             var botRt = botVignette.GetComponent<RectTransform>();
             botRt.anchorMin = Vector2.zero;
-            botRt.anchorMax = new Vector2(1f, 0.28f);
+            botRt.anchorMax = new Vector2(1f, 0.24f);
             botRt.sizeDelta = Vector2.zero;
             var botGrad = botVignette.GetComponent<UIGradientGraphic>();
-            botGrad.SetVertical(Color.clear, new Color(0.02f, 0.05f, 0.12f, 0.75f));
+            botGrad.SetVertical(Color.clear, new Color(0.02f, 0.05f, 0.12f, 0.65f));
             botGrad.raycastTarget = false;
 
-            // 3. Top Header Bar
+            // 3. Slim Top Header Bar
             var headerGo = new GameObject("TopHeader", typeof(RectTransform));
             headerGo.transform.SetParent(transform, false);
             var headerRt = headerGo.GetComponent<RectTransform>();
             headerRt.anchorMin = new Vector2(0f, 1f);
             headerRt.anchorMax = new Vector2(1f, 1f);
             headerRt.pivot = new Vector2(0.5f, 1f);
-            headerRt.anchoredPosition = new Vector2(0f, -36f);
-            headerRt.sizeDelta = new Vector2(-120f, 48f);
+            headerRt.anchoredPosition = new Vector2(0f, -34f);
+            headerRt.sizeDelta = new Vector2(-140f, 34f);
 
             var topDivGo = new GameObject("HeaderLine", typeof(RectTransform), typeof(UIDividerGraphic));
             topDivGo.transform.SetParent(headerGo.transform, false);
             var topDivRt = topDivGo.GetComponent<RectTransform>();
             topDivRt.anchorMin = new Vector2(0f, 0f);
             topDivRt.anchorMax = new Vector2(1f, 0f);
-            topDivRt.sizeDelta = new Vector2(0f, 1.5f);
+            topDivRt.sizeDelta = new Vector2(0f, 1f);
             var topDiv = topDivGo.GetComponent<UIDividerGraphic>();
             topDiv.color = PacificRimUITheme.Line;
             topDiv.raycastTarget = false;
-
-            var ppdcTitleGo = new GameObject("PPDCTitle", typeof(RectTransform), typeof(Text));
-            ppdcTitleGo.transform.SetParent(headerGo.transform, false);
-            var ppdcTitleRt = ppdcTitleGo.GetComponent<RectTransform>();
-            ppdcTitleRt.anchorMin = new Vector2(0f, 0.45f);
-            ppdcTitleRt.anchorMax = new Vector2(1f, 1f);
-            ppdcTitleRt.sizeDelta = Vector2.zero;
-            var ppdcTitle = ppdcTitleGo.GetComponent<Text>();
-            ppdcTitle.font = font;
-            ppdcTitle.fontSize = 14;
-            ppdcTitle.fontStyle = FontStyle.Bold;
-            ppdcTitle.color = PacificRimUITheme.BlueBright;
-            ppdcTitle.alignment = TextAnchor.MiddleLeft;
-            ppdcTitle.text = "PACIFIC RIM: OPERATION PITFALL // PPDC TACTICAL NETWORK";
-            ppdcTitle.raycastTarget = false;
 
             var ppdcSubGo = new GameObject("PPDCSector", typeof(RectTransform), typeof(Text));
             ppdcSubGo.transform.SetParent(headerGo.transform, false);
             var ppdcSubRt = ppdcSubGo.GetComponent<RectTransform>();
             ppdcSubRt.anchorMin = new Vector2(0f, 0f);
-            ppdcSubRt.anchorMax = new Vector2(1f, 0.45f);
+            ppdcSubRt.anchorMax = new Vector2(0.75f, 1f);
             ppdcSubRt.sizeDelta = Vector2.zero;
             var ppdcSub = ppdcSubGo.GetComponent<Text>();
             ppdcSub.font = font;
-            ppdcSub.fontSize = 11;
-            ppdcSub.color = PacificRimUITheme.TextDim;
+            ppdcSub.fontSize = 12;
+            ppdcSub.fontStyle = FontStyle.Bold;
+            ppdcSub.color = PacificRimUITheme.BlueBright;
             ppdcSub.alignment = TextAnchor.MiddleLeft;
-            ppdcSub.text = "COMBAT DEPLOYMENT PROTOCOL // SECTOR 04: OBLIVION BAY";
+            ppdcSub.text = "SHATTERDOME // SECTOR";
             ppdcSub.raycastTarget = false;
+            sectorSubText = ppdcSub;
+
+            var ppdcTitleGo = new GameObject("PPDCTitle", typeof(RectTransform), typeof(Text));
+            ppdcTitleGo.transform.SetParent(headerGo.transform, false);
+            var ppdcTitleRt = ppdcTitleGo.GetComponent<RectTransform>();
+            ppdcTitleRt.anchorMin = new Vector2(0.75f, 0f);
+            ppdcTitleRt.anchorMax = new Vector2(1f, 1f);
+            ppdcTitleRt.sizeDelta = Vector2.zero;
+            var ppdcTitle = ppdcTitleGo.GetComponent<Text>();
+            ppdcTitle.font = font;
+            ppdcTitle.fontSize = 11;
+            ppdcTitle.fontStyle = FontStyle.Bold;
+            ppdcTitle.color = PacificRimUITheme.TextMuted;
+            ppdcTitle.alignment = TextAnchor.MiddleRight;
+            ppdcTitle.text = "MARK-III";
+            ppdcTitle.raycastTarget = false;
 
             // 4. Center Hologram Blueprint Reticle
             var reticleGo = new GameObject("CenterReticle", typeof(RectTransform), typeof(UIHoloReticleGraphic));
@@ -462,10 +492,10 @@ namespace PacificRimUI
             reticleTransform.anchorMin = new Vector2(0.5f, 0.54f);
             reticleTransform.anchorMax = new Vector2(0.5f, 0.54f);
             reticleTransform.pivot = new Vector2(0.5f, 0.5f);
-            reticleTransform.sizeDelta = new Vector2(230f, 230f);
+            reticleTransform.sizeDelta = new Vector2(184f, 184f);
             var holoRet = reticleGo.GetComponent<UIHoloReticleGraphic>();
             holoRet.color = new Color(PacificRimUITheme.BlueBright.r, PacificRimUITheme.BlueBright.g, PacificRimUITheme.BlueBright.b, 0.65f);
-            holoRet.ringThickness = 2.0f;
+            holoRet.ringThickness = 1.6f;
             holoRet.segments = 56;
             holoRet.raycastTarget = false;
 
@@ -474,11 +504,11 @@ namespace PacificRimUI
             var innerCircleRt = innerCircleGo.GetComponent<RectTransform>();
             innerCircleRt.anchorMin = new Vector2(0.5f, 0.5f);
             innerCircleRt.anchorMax = new Vector2(0.5f, 0.5f);
-            innerCircleRt.sizeDelta = new Vector2(175f, 175f);
+            innerCircleRt.sizeDelta = new Vector2(138f, 138f);
             var innerCircle = innerCircleGo.GetComponent<UICircleOutlineGraphic>();
-            innerCircle.fillColor = new Color(0.04f, 0.08f, 0.16f, 0.35f);
-            innerCircle.borderColor = new Color(PacificRimUITheme.Blue.r, PacificRimUITheme.Blue.g, PacificRimUITheme.Blue.b, 0.35f);
-            innerCircle.thickness = 1.2f;
+            innerCircle.fillColor = new Color(0.04f, 0.08f, 0.16f, 0.30f);
+            innerCircle.borderColor = new Color(PacificRimUITheme.Blue.r, PacificRimUITheme.Blue.g, PacificRimUITheme.Blue.b, 0.32f);
+            innerCircle.thickness = 1f;
             innerCircle.raycastTarget = false;
 
             var jaegerLabelGo = new GameObject("CenterJaegerLabel", typeof(RectTransform), typeof(Text));
@@ -487,14 +517,14 @@ namespace PacificRimUI
             jaegerLabelRt.anchorMin = new Vector2(0.5f, 0.54f);
             jaegerLabelRt.anchorMax = new Vector2(0.5f, 0.54f);
             jaegerLabelRt.pivot = new Vector2(0.5f, 0.5f);
-            jaegerLabelRt.sizeDelta = new Vector2(200f, 50f);
+            jaegerLabelRt.sizeDelta = new Vector2(160f, 44f);
             var jaegerLabel = jaegerLabelGo.GetComponent<Text>();
             jaegerLabel.font = font;
-            jaegerLabel.fontSize = 13;
+            jaegerLabel.fontSize = 12;
             jaegerLabel.fontStyle = FontStyle.Bold;
             jaegerLabel.alignment = TextAnchor.MiddleCenter;
             jaegerLabel.color = PacificRimUITheme.Text;
-            jaegerLabel.text = "GIPSY DANGER\n<size=10><color=#46c3ff>MARK-III JAEGER</color></size>";
+            jaegerLabel.text = "GIPSY DANGER";
             jaegerLabel.raycastTarget = false;
 
             // 5. Bottom Loading Container
@@ -504,21 +534,21 @@ namespace PacificRimUI
             botContainerRt.anchorMin = new Vector2(0.5f, 0f);
             botContainerRt.anchorMax = new Vector2(0.5f, 0f);
             botContainerRt.pivot = new Vector2(0.5f, 0f);
-            botContainerRt.anchoredPosition = new Vector2(0f, 65f);
-            botContainerRt.sizeDelta = new Vector2(760f, 140f);
+            botContainerRt.anchoredPosition = new Vector2(0f, 64f);
+            botContainerRt.sizeDelta = new Vector2(640f, 108f);
 
             // Status Text (Left)
             var statusGo = new GameObject("StatusText", typeof(RectTransform), typeof(Text));
             statusGo.transform.SetParent(bottomContainer.transform, false);
             var statusRt = statusGo.GetComponent<RectTransform>();
             statusRt.anchorMin = new Vector2(0f, 1f);
-            statusRt.anchorMax = new Vector2(0.78f, 1f);
+            statusRt.anchorMax = new Vector2(0.75f, 1f);
             statusRt.pivot = new Vector2(0f, 1f);
-            statusRt.anchoredPosition = new Vector2(6f, -12f);
-            statusRt.sizeDelta = new Vector2(0f, 24f);
+            statusRt.anchoredPosition = new Vector2(0f, -6f);
+            statusRt.sizeDelta = new Vector2(0f, 22f);
             statusText = statusGo.GetComponent<Text>();
             statusText.font = font;
-            statusText.fontSize = 12;
+            statusText.fontSize = 11;
             statusText.fontStyle = FontStyle.Bold;
             statusText.color = PacificRimUITheme.BlueBright;
             statusText.alignment = TextAnchor.MiddleLeft;
@@ -529,49 +559,41 @@ namespace PacificRimUI
             var percentGo = new GameObject("PercentText", typeof(RectTransform), typeof(Text));
             percentGo.transform.SetParent(bottomContainer.transform, false);
             var percentRt = percentGo.GetComponent<RectTransform>();
-            percentRt.anchorMin = new Vector2(0.78f, 1f);
+            percentRt.anchorMin = new Vector2(0.75f, 1f);
             percentRt.anchorMax = new Vector2(1f, 1f);
             percentRt.pivot = new Vector2(1f, 1f);
-            percentRt.anchoredPosition = new Vector2(-6f, -12f);
-            percentRt.sizeDelta = new Vector2(0f, 24f);
+            percentRt.anchoredPosition = new Vector2(0f, -6f);
+            percentRt.sizeDelta = new Vector2(0f, 22f);
             percentText = percentGo.GetComponent<Text>();
             percentText.font = font;
-            percentText.fontSize = 16;
+            percentText.fontSize = 14;
             percentText.fontStyle = FontStyle.Bold;
             percentText.color = PacificRimUITheme.Text;
             percentText.alignment = TextAnchor.MiddleRight;
-            percentText.text = "[ 0% ]";
+            percentText.text = "0%";
             percentText.raycastTarget = false;
 
-            // Progress Bar Frame
-            var barFrameGo = new GameObject("ProgressBarFrame", typeof(RectTransform), typeof(UIChamferGraphic));
+            // Sleek Progress Bar Track
+            var barFrameGo = new GameObject("ProgressBarFrame", typeof(RectTransform), typeof(Image));
             barFrameGo.transform.SetParent(bottomContainer.transform, false);
             var barFrameRt = barFrameGo.GetComponent<RectTransform>();
             barFrameRt.anchorMin = new Vector2(0f, 1f);
             barFrameRt.anchorMax = new Vector2(1f, 1f);
             barFrameRt.pivot = new Vector2(0.5f, 1f);
-            barFrameRt.anchoredPosition = new Vector2(0f, -42f);
-            barFrameRt.sizeDelta = new Vector2(0f, 18f);
-            var barFrame = barFrameGo.GetComponent<UIChamferGraphic>();
-            barFrame.chamferSize = 5f;
-            barFrame.borderThickness = 1.2f;
-            barFrame.fillColor = new Color(0.04f, 0.06f, 0.10f, 0.85f);
-            barFrame.borderColor = new Color(PacificRimUITheme.BlueBright.r, PacificRimUITheme.BlueBright.g, PacificRimUITheme.BlueBright.b, 0.65f);
-            barFrame.chamferTopLeft = true;
-            barFrame.chamferBottomRight = true;
-            barFrame.chamferTopRight = false;
-            barFrame.chamferBottomLeft = false;
-            barFrame.raycastTarget = false;
+            barFrameRt.anchoredPosition = new Vector2(0f, -34f);
+            barFrameRt.sizeDelta = new Vector2(0f, 6f);
+            var barTrack = barFrameGo.GetComponent<Image>();
+            barTrack.color = PacificRimUITheme.BarTrack;
+            barTrack.raycastTarget = false;
 
-            // Progress Bar Fill
+            // Progress Bar Fill (anchor-driven 0..1)
             var fillGo = new GameObject("ProgressBarFill", typeof(RectTransform), typeof(Image));
             fillGo.transform.SetParent(barFrameGo.transform, false);
             barFill = fillGo.GetComponent<RectTransform>();
             barFill.anchorMin = new Vector2(0f, 0f);
             barFill.anchorMax = new Vector2(0f, 1f);
-            barFill.pivot = new Vector2(0f, 0.5f);
-            barFill.anchoredPosition = new Vector2(3f, 0f);
-            barFill.sizeDelta = new Vector2(0f, -4f);
+            barFill.offsetMin = Vector2.zero;
+            barFill.offsetMax = Vector2.zero;
             var fillImg = fillGo.GetComponent<Image>();
             fillImg.color = PacificRimUITheme.BlueBright;
             fillImg.raycastTarget = false;
@@ -583,15 +605,14 @@ namespace PacificRimUI
             tipRt.anchorMin = new Vector2(0f, 0f);
             tipRt.anchorMax = new Vector2(1f, 0f);
             tipRt.pivot = new Vector2(0.5f, 0f);
-            tipRt.anchoredPosition = new Vector2(0f, 10f);
-            tipRt.sizeDelta = new Vector2(0f, 45f);
+            tipRt.anchoredPosition = new Vector2(0f, 8f);
+            tipRt.sizeDelta = new Vector2(0f, 36f);
             tipText = tipGo.GetComponent<Text>();
             tipText.font = font;
             tipText.fontSize = 11;
-            tipText.fontStyle = FontStyle.Italic;
             tipText.color = PacificRimUITheme.TextDim;
             tipText.alignment = TextAnchor.MiddleCenter;
-            tipText.text = $"\"{TacticalTips[0]}\"";
+            tipText.text = TacticalTips[0];
             tipText.raycastTarget = false;
 
             // Default state: canvas disabled so it doesn't render until LoadScene or ShowImmediate is called,

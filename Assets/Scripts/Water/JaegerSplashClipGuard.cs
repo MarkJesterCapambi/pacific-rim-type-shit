@@ -121,36 +121,76 @@ namespace PacificRimWater
 
             // Leatherback Kaiju rig fallback
             Transform lowerTorso = FindBone("LowerTorsoBone");
-            Transform upperTorso = FindBone("UpperTorsoBone");
-            Transform clavicle = FindBone("ClavicleBone");
-            Transform kaijuHead = FindBone("UpperHead");
-            Transform shoulderL = FindBone("ShoulderBone.L");
-            Transform shoulderR = FindBone("ShoulderBone.R");
-            Transform bicepL = FindBone("BicepBone.L");
-            Transform bicepR = FindBone("BicepBone.R");
-            Transform forearmL = FindBone("ForearmBone.L");
-            Transform forearmR = FindBone("ForearmBone.R");
-            Transform handL_K = FindBone("HandBone.L");
-            Transform handR_K = FindBone("HandBone.R");
-            Transform upperLegL = FindBone("UpperLegBone.L");
-            Transform upperLegR = FindBone("UpperLegBone.R");
-            Transform lowerLegL = FindBone("LowerLegBone.L");
-            Transform lowerLegR = FindBone("LowerLegBone.R");
-            Transform footL_K = FindBone("FootBone.L");
-            Transform footR_K = FindBone("FootBone.R");
+            if (lowerTorso != null)
+            {
+                Transform upperTorso = FindBone("UpperTorsoBone");
+                Transform clavicle = FindBone("ClavicleBone");
+                Transform kaijuHead = FindBone("UpperHead");
+                Transform shoulderL = FindBone("ShoulderBone.L");
+                Transform shoulderR = FindBone("ShoulderBone.R");
+                Transform bicepL = FindBone("BicepBone.L");
+                Transform bicepR = FindBone("BicepBone.R");
+                Transform forearmL = FindBone("ForearmBone.L");
+                Transform forearmR = FindBone("ForearmBone.R");
+                Transform handL_K = FindBone("HandBone.L");
+                Transform handR_K = FindBone("HandBone.R");
+                Transform upperLegL = FindBone("UpperLegBone.L");
+                Transform upperLegR = FindBone("UpperLegBone.R");
+                Transform lowerLegL = FindBone("LowerLegBone.L");
+                Transform lowerLegR = FindBone("LowerLegBone.R");
+                Transform footL_K = FindBone("FootBone.L");
+                Transform footR_K = FindBone("FootBone.R");
 
-            Add("LowerTorso", lowerTorso, upperTorso, 3.8f);
-            Add("UpperTorso", upperTorso, clavicle, 4.2f);
-            Add("Head", clavicle, kaijuHead, 2.8f);
-            Add("ShoulderBar", shoulderL, shoulderR, 2.6f);
-            Add("Bicep.L", bicepL, forearmL, 2.6f);
-            Add("Bicep.R", bicepR, forearmR, 2.6f);
-            Add("Forearm.L", forearmL, handL_K, 2.6f);
-            Add("Forearm.R", forearmR, handR_K, 2.6f);
-            Add("UpperLeg.L", upperLegL, lowerLegL, 2.5f);
-            Add("UpperLeg.R", upperLegR, lowerLegR, 2.5f);
-            Add("LowerLeg.L", lowerLegL, footL_K, 2.5f);
-            Add("LowerLeg.R", lowerLegR, footR_K, 2.5f);
+                Add("LowerTorso", lowerTorso, upperTorso, 3.8f);
+                Add("UpperTorso", upperTorso, clavicle, 4.2f);
+                Add("Head", clavicle, kaijuHead, 2.8f);
+                Add("ShoulderBar", shoulderL, shoulderR, 2.6f);
+                Add("Bicep.L", bicepL, forearmL, 2.6f);
+                Add("Bicep.R", bicepR, forearmR, 2.6f);
+                Add("Forearm.L", forearmL, handL_K, 2.6f);
+                Add("Forearm.R", forearmR, handR_K, 2.6f);
+                Add("UpperLeg.L", upperLegL, lowerLegL, 2.5f);
+                Add("UpperLeg.R", upperLegR, lowerLegR, 2.5f);
+                Add("LowerLeg.L", lowerLegL, footL_K, 2.5f);
+                Add("LowerLeg.R", lowerLegR, footR_K, 2.5f);
+                return;
+            }
+
+            // Slattern Kaiju rig fallback
+            Transform sLowerTorso = FindBone("LowerTorso");
+            if (sLowerTorso != null)
+            {
+                Transform sUpperTorso = FindBone("UpperTorso");
+                Transform sNeck = FindBone("Neck");
+                Transform sHead = FindBone("UpperHead");
+                Transform sShoulderL = FindBone("Shoulder.L");
+                Transform sShoulderR = FindBone("Shoulder.R");
+                Transform sUpperArmL = FindBone("UpperArm.L");
+                Transform sUpperArmR = FindBone("UpperArm.R");
+                Transform sLowerArmL = FindBone("LowerArm.L");
+                Transform sLowerArmR = FindBone("LowerArm.R");
+                Transform sWristL = FindBone("Wrist.L");
+                Transform sWristR = FindBone("Wrist.R");
+                Transform sUpperLegL = FindBone("UpperLeg.L");
+                Transform sUpperLegR = FindBone("UpperLeg.R");
+                Transform sLowerLegL = FindBone("LowerLeg.L");
+                Transform sLowerLegR = FindBone("LowerLeg.R");
+                Transform sFootL = FindBone("Foot.L");
+                Transform sFootR = FindBone("Foot.R");
+
+                Add("LowerTorso", sLowerTorso, sUpperTorso, 4.0f);
+                Add("UpperTorso", sUpperTorso, sNeck, 4.4f);
+                Add("Head", sNeck, sHead, 3.0f);
+                Add("ShoulderBar", sShoulderL, sShoulderR, 2.8f);
+                Add("UpperArm.L", sUpperArmL, sLowerArmL, 2.6f);
+                Add("UpperArm.R", sUpperArmR, sLowerArmR, 2.6f);
+                Add("LowerArm.L", sLowerArmL, sWristL, 2.5f);
+                Add("LowerArm.R", sLowerArmR, sWristR, 2.5f);
+                Add("UpperLeg.L", sUpperLegL, sLowerLegL, 2.6f);
+                Add("UpperLeg.R", sUpperLegR, sLowerLegR, 2.6f);
+                Add("LowerLeg.L", sLowerLegL, sFootL, 2.5f);
+                Add("LowerLeg.R", sLowerLegR, sFootR, 2.5f);
+            }
         }
 
         private void Add(string label, Transform a, Transform b, float radius)

@@ -57,7 +57,11 @@ namespace PacificRimUI
         [SerializeField] private PacificRimKeyPrompt lightAttackPrompt;
         [SerializeField] private PacificRimKeyPrompt heavyAttackPrompt;
         [SerializeField] private PacificRimKeyPrompt defensePrompt;
+        [SerializeField] private PacificRimKeyPrompt dashPrompt;
+        [SerializeField] private PacificRimKeyPrompt bladesPrompt;
         [SerializeField] private PacificRimKeyPrompt overchargePrompt;
+        [SerializeField] private PacificRimKeyPrompt plasmaPrompt;
+        [SerializeField] private PacificRimKeyPrompt camPrompt;
         [SerializeField] private PacificRimKeyPrompt menuPrompt;
 
         [Header("Notification Banner (Top-Center)")]
@@ -87,12 +91,25 @@ namespace PacificRimUI
         private float impactFlashAlpha;
         private float impactFlashDecaySpeed = 2.8f;
         private float lastExhaustedBannerTime = -10f;
+        private bool lastBladesActiveCached;
+        private bool lastSurgeActiveCached;
+        private int lastSurgeTenthsCached = -1;
+        private bool lastCamFreeCached;
+        private bool lastDashActiveCached;
+        private KeyCode lastPlasmaKeyCodeCached = KeyCode.None;
+        private string lastPlasmaKeyCached;
+        private string lastPlasmaLabelCached;
+        private bool lastPlasmaHighlightCached;
+        private Color lastPlasmaColorCached;
         private bool stateInitialized;
         private CanvasGroup hudCanvasGroup;
         private bool isCutsceneMode;
         private Coroutine neuralBootRoutine;
 
-        // GTA-style "baguvix" cheat code state
+        // Admin UI toggle buffer ("hesoyam")
+        private static int suppressFreeCamFrame = -1;
+        public static bool SuppressFreeCamThisFrame => suppressFreeCamFrame == Time.frameCount;
+
         private string cheatInputBuffer = "";
         private int lastCheatCharFrame = -1;
         private char lastCheatChar = '\0';
@@ -209,7 +226,7 @@ namespace PacificRimUI
                 hudCanvasGroup.interactable = true;
             }
 
-            ShowBanner("<color=#00e5ff><b>NEURAL HANDSHAKE: 100% // ALL WEAPON SYSTEMS ONLINE</b></color>", 2.4f);
+            ShowBanner("<color=#46c3ff><b>DRIFT SYNC 100%  ·  SYSTEMS ONLINE</b></color>", 2.2f);
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDStaminaRecovered35();
             PacificRimUISound.PlaySuccess();
 
@@ -321,74 +338,24 @@ namespace PacificRimUI
                 cheatInputBuffer = cheatInputBuffer.Substring(cheatInputBuffer.Length - 24);
             }
 
-            if (cheatInputBuffer.EndsWith("baguvix", System.StringComparison.OrdinalIgnoreCase))
+            if (cheatInputBuffer.EndsWith("he", System.StringComparison.OrdinalIgnoreCase))
             {
-                cheatInputBuffer = "";
-                TriggerBaguvixCheat();
+                suppressFreeCamFrame = Time.frameCount;
             }
-            else if (cheatInputBuffer.EndsWith("hesoyam", System.StringComparison.OrdinalIgnoreCase))
+
+            if (cheatInputBuffer.EndsWith("hesoyam", System.StringComparison.OrdinalIgnoreCase))
             {
                 cheatInputBuffer = "";
-                TriggerHesoyamCheat();
-            }
-            else if (cheatInputBuffer.EndsWith("ironman", System.StringComparison.OrdinalIgnoreCase))
-            {
-                cheatInputBuffer = "";
-                TriggerIronmanCheat();
+                TriggerAdminUIToggle();
             }
         }
 
-        public void TriggerIronmanCheat()
+        public void TriggerAdminUIToggle()
         {
-            if (jaeger == null)
-                jaeger = FindAnyObjectByType<SimpleJaegerController>();
-
-            bool active = true;
-            if (jaeger != null)
-            {
-                jaeger.ToggleIronmanCheat();
-                active = jaeger.IsIronmanCheatActive;
-            }
-
-            PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDCheatActivated();
-            PacificRimUISound.PlaySuccess();
-            string bannerMsg = active
-                ? "CHEAT ACTIVATED // IRONMAN: 3X DAMAGE & 3X RESISTANCE"
-                : "CHEAT DEACTIVATED // IRONMAN: NORMAL POWER";
-            ShowBanner(bannerMsg, 4.0f);
-            Debug.Log($"<color=#00e5ff><b>[CHEAT]</b></color> IRONMAN {(active ? "ACTIVATED: 3x Strike Damage & 3x Attack Resistance" : "DEACTIVATED")}");
-        }
-
-        public void TriggerHesoyamCheat()
-        {
-            if (kaiju == null)
-                kaiju = FindAnyObjectByType<KaijuAI>();
-
-            if (kaiju != null)
-            {
-                kaiju.DisableAIEntirely();
-            }
-
-            PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDCheatActivated();
-            PacificRimUISound.PlaySuccess();
-            ShowBanner("CHEAT ACTIVATED // HESOYAM: KAIJU AI DISABLED", 4.0f);
-            Debug.Log("<color=#00e5ff><b>[CHEAT]</b></color> HESOYAM ACTIVATED: Leatherback's AI is completely disabled until level restart!");
-        }
-
-        public void TriggerBaguvixCheat()
-        {
-            if (kaiju == null)
-                kaiju = FindAnyObjectByType<KaijuAI>();
-
-            if (kaiju != null)
-            {
-                kaiju.ActivateBaguvixCheat();
-            }
-
-            PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDCheatActivated();
-            PacificRimUISound.PlaySuccess();
-            ShowBanner("CHEAT ACTIVATED // BAGUVIX: PACIFIST KAIJU", 4.0f);
-            Debug.Log("<color=#00e5ff><b>[CHEAT]</b></color> BAGUVIX ACTIVATED: Leatherback's hostility disabled! Fallback AI & invulnerability engaged until level restart.");
+            PacificRimAdminUI.Toggle();
+            PacificRimUISound.Play(PacificRimAdminUI.IsOpen
+                ? PacificRimUISound.SoundType.Click
+                : PacificRimUISound.SoundType.Back);
         }
 
         private void ResolveReferences()
@@ -407,7 +374,7 @@ namespace PacificRimUI
                 SetHudHidden(!IsHudHidden);
             }
 
-            // GTA-style "baguvix" cheat code detection
+            // Admin console key sequence detection ("hesoyam")
             UpdateCheatCodeInput();
 
             ResolveReferences();
@@ -496,7 +463,7 @@ namespace PacificRimUI
 
             if (hullCaptionText != null)
             {
-                hullCaptionText.text = jaeger.IsDead ? "HULL COMPROMISED // DESTROYED" : "HULL INTEGRITY";
+                hullCaptionText.text = jaeger.IsDead ? "HULL DESTROYED" : "HULL";
                 hullCaptionText.color = jaeger.IsDead ? PacificRimUITheme.Danger : PacificRimUITheme.TextDim;
             }
 
@@ -505,7 +472,7 @@ namespace PacificRimUI
                 PacificRimUISound.PlayDeny();
                 isCombatFinished = true;
                 isCombatTimerRunning = false;
-                ShowBanner("CRITICAL HULL BREACH // JAEGER DESTROYED", 4.0f);
+                ShowBanner("CRITICAL HULL BREACH  ·  JAEGER LOST", 4.0f);
             }
             wasJaegerDead = jaeger.IsDead;
 
@@ -515,7 +482,7 @@ namespace PacificRimUI
             {
                 powerUpTimer = Mathf.Max(0.1f, jaeger.powerUpDuration);
                 PacificRimUISound.PlaySuccess();
-                ShowBanner("TURBINE OVERCHARGE ENGAGED", 2.2f);
+                ShowBanner("TURBINE OVERCHARGE", 2.0f);
             }
             wasPoweredUp = powered;
 
@@ -538,7 +505,7 @@ namespace PacificRimUI
                 if (overchargeStatusText != null)
                 {
                     overchargeStatusText.supportRichText = true;
-                    overchargeStatusText.text = PacificRimUITheme.Track("TURBINE OVERCHARGE", 2, 12, true);
+                    overchargeStatusText.text = "OVERCHARGE";
                     overchargeStatusText.color = PacificRimUITheme.BlueBright;
                 }
 
@@ -581,37 +548,53 @@ namespace PacificRimUI
             }
             wasBlocking = blocking;
 
+            bool bladesActive = jaeger.AreChainswordsActive;
             if (combatStanceValueText != null)
             {
                 combatStanceValueText.supportRichText = true;
-                combatStanceValueText.text = PacificRimUITheme.Track(
-                    inStance ? "ENGAGED // COMBAT READY" : "STANDBY",
-                    1, 13, true);
-                combatStanceValueText.color = inStance ? PacificRimUITheme.BlueBright : PacificRimUITheme.TextDim;
+                combatStanceValueText.text = bladesActive ? "DEPLOYED" : "STOWED";
+                combatStanceValueText.color = bladesActive ? PacificRimUITheme.BlueBright : PacificRimUITheme.TextMuted;
             }
 
             if (defenseMatrixValueText != null)
             {
                 defenseMatrixValueText.supportRichText = true;
-                defenseMatrixValueText.text = PacificRimUITheme.Track(
-                    blocking ? "MATRIX LOCKED" : "OPEN",
-                    1, 13, true);
-                defenseMatrixValueText.color = blocking ? PacificRimUITheme.BlueBright : PacificRimUITheme.TextDim;
+                if (jaeger.IsExhausted)
+                {
+                    defenseMatrixValueText.text = "LOCKED";
+                    defenseMatrixValueText.color = PacificRimUITheme.Danger;
+                }
+                else
+                {
+                    defenseMatrixValueText.text = blocking ? "BLOCKING" : "READY";
+                    defenseMatrixValueText.color = blocking ? PacificRimUITheme.BlueBright : PacificRimUITheme.TextDim;
+                }
             }
 
+            bool isFreeCam = JaegerCameraFollow.Instance != null && JaegerCameraFollow.Instance.isFreeCam;
             if (depthTelemetryText != null)
             {
-                float waterY = 0f;
-                if (WaterSystem.Instance != null)
-                {
-                    waterY = WaterSystem.Instance.GetWaterHeight(jaeger.transform.position);
-                }
-                float depth = Mathf.Max(0f, waterY - jaeger.transform.position.y);
                 depthTelemetryText.supportRichText = true;
-                depthTelemetryText.text = PacificRimUITheme.Track($"SEA DEPTH {depth:0.0}M", 1, 13, true);
+                if (isFreeCam)
+                {
+                    depthTelemetryText.text = "FREECAM";
+                    depthTelemetryText.color = PacificRimUITheme.Amber;
+                }
+                else if (WaterSystem.Instance != null)
+                {
+                    float waterY = WaterSystem.Instance.GetWaterHeight(jaeger.transform.position);
+                    float depth = Mathf.Max(0f, waterY - jaeger.transform.position.y);
+                    depthTelemetryText.text = $"{depth:0}M";
+                    depthTelemetryText.color = PacificRimUITheme.TextDim;
+                }
+                else
+                {
+                    depthTelemetryText.text = "10,890M";
+                    depthTelemetryText.color = PacificRimUITheme.TextDim;
+                }
             }
 
-            // Update tactical prompts (attacks are always armed)
+            // Update tactical footer prompts
             if (stancePrompt != null && stancePrompt.gameObject.activeSelf)
                 stancePrompt.gameObject.SetActive(false);
             if (lightAttackPrompt != null)
@@ -620,14 +603,56 @@ namespace PacificRimUI
                 heavyAttackPrompt.SetHighlight(false, PacificRimUITheme.BlueBright);
             if (defensePrompt != null)
                 defensePrompt.SetHighlight(blocking, PacificRimUITheme.BlueBright);
+
+            bool isDashing = jaeger.IsDashing;
+            if (dashPrompt != null && isDashing != lastDashActiveCached)
+            {
+                lastDashActiveCached = isDashing;
+                dashPrompt.SetHighlight(isDashing, PacificRimUITheme.BlueBright);
+            }
+
+            if (bladesPrompt != null && bladesActive != lastBladesActiveCached)
+            {
+                lastBladesActiveCached = bladesActive;
+                bladesPrompt.SetHighlight(bladesActive, PacificRimUITheme.BlueBright);
+            }
+
+            bool powered = jaeger.IsPoweredUp;
             if (overchargePrompt != null)
-                overchargePrompt.SetHighlight(jaeger.IsPoweredUp, PacificRimUITheme.Amber);
+            {
+                int tenths = powered ? Mathf.CeilToInt(powerUpTimer * 10f) : -1;
+                if (powered != lastSurgeActiveCached || tenths != lastSurgeTenthsCached)
+                {
+                    lastSurgeActiveCached = powered;
+                    lastSurgeTenthsCached = tenths;
+                    if (powered)
+                    {
+                        overchargePrompt.Setup("Q", $"{tenths / 10}.{tenths % 10}S");
+                        overchargePrompt.SetHighlight(true, PacificRimUITheme.Amber);
+                    }
+                    else
+                    {
+                        overchargePrompt.Setup("Q", "SURGE");
+                        overchargePrompt.SetHighlight(false, PacificRimUITheme.Amber);
+                    }
+                }
+            }
+
+            if (camPrompt != null && isFreeCam != lastCamFreeCached)
+            {
+                lastCamFreeCached = isFreeCam;
+                camPrompt.SetHighlight(isFreeCam, PacificRimUITheme.Amber);
+            }
+
+            UpdatePlasmaPrompt();
 
             // Reticle state tint
             if (holoReticle != null)
             {
                 Color targetColor;
-                if (blocking)
+                if (jaeger.IsPlasmaCharging)
+                    targetColor = new Color(0.40f, 0.98f, 1f, 0.95f);
+                else if (blocking)
                     targetColor = new Color(PacificRimUITheme.BlueBright.r, PacificRimUITheme.BlueBright.g, PacificRimUITheme.BlueBright.b, 0.85f);
                 else if (inStance)
                     targetColor = jaeger.IsPoweredUp
@@ -637,6 +662,102 @@ namespace PacificRimUI
                     targetColor = new Color(PacificRimUITheme.TextDim.r, PacificRimUITheme.TextDim.g, PacificRimUITheme.TextDim.b, 0.28f);
 
                 holoReticle.color = Color.Lerp(holoReticle.color, targetColor, Time.deltaTime * 12f);
+            }
+        }
+
+        private void EnsurePlasmaPromptUI()
+        {
+            if (plasmaPrompt != null || overchargePrompt == null) return;
+
+            Transform parent = overchargePrompt.transform.parent;
+            if (parent == null) return;
+
+            Transform existing = parent.Find("Prompt_Plasma");
+            if (existing != null)
+            {
+                plasmaPrompt = existing.GetComponent<PacificRimKeyPrompt>();
+                if (plasmaPrompt != null) return;
+            }
+
+            GameObject clone = Instantiate(overchargePrompt.gameObject, parent, false);
+            clone.name = "Prompt_Plasma";
+            if (menuPrompt != null && menuPrompt.transform.parent == parent)
+            {
+                clone.transform.SetSiblingIndex(menuPrompt.transform.GetSiblingIndex());
+            }
+
+            var le = clone.GetComponent<LayoutElement>();
+            if (le != null) le.preferredWidth = 178f;
+
+            plasmaPrompt = clone.GetComponent<PacificRimKeyPrompt>();
+            if (plasmaPrompt != null)
+            {
+                plasmaPrompt.Setup("T", "PLASMA READY");
+            }
+        }
+
+        private void UpdatePlasmaPrompt()
+        {
+            EnsurePlasmaPromptUI();
+            if (plasmaPrompt == null || jaeger == null) return;
+
+            bool keyChanged = jaeger.plasmaCasterKey != lastPlasmaKeyCodeCached || string.IsNullOrEmpty(lastPlasmaKeyCached);
+            if (keyChanged)
+            {
+                lastPlasmaKeyCodeCached = jaeger.plasmaCasterKey;
+                lastPlasmaKeyCached = lastPlasmaKeyCodeCached.ToString().ToUpperInvariant();
+            }
+            string keyStr = lastPlasmaKeyCached;
+
+            string label;
+            bool highlight;
+            Color accent;
+
+            if (jaeger.IsPlasmaCharging)
+            {
+                label = "CHARGING";
+                highlight = true;
+                accent = PacificRimUITheme.BlueBright;
+            }
+            else if (jaeger.IsPlasmaAiming)
+            {
+                label = "FIRED";
+                highlight = true;
+                accent = PacificRimUITheme.Amber;
+            }
+            else if (jaeger.PlasmaCooldownRemaining > 0.05f)
+            {
+                int tenths = Mathf.CeilToInt(jaeger.PlasmaCooldownRemaining * 10f);
+                label = $"{tenths / 10}.{tenths % 10}S";
+                highlight = false;
+                accent = PacificRimUITheme.Amber;
+            }
+            else if (!jaeger.HasEnoughStaminaForPlasma)
+            {
+                label = "<70% STM";
+                highlight = false;
+                accent = PacificRimUITheme.Danger;
+            }
+            else
+            {
+                label = "PLASMA";
+                highlight = true;
+                accent = PacificRimUITheme.BlueBright;
+            }
+
+            if (keyChanged || label != lastPlasmaLabelCached)
+            {
+                lastPlasmaLabelCached = label;
+                plasmaPrompt.Setup(keyStr, label);
+                plasmaPrompt.SetHighlight(highlight, accent);
+                lastPlasmaHighlightCached = highlight;
+                lastPlasmaColorCached = accent;
+            }
+            else if (highlight != lastPlasmaHighlightCached || accent != lastPlasmaColorCached)
+            {
+                lastPlasmaHighlightCached = highlight;
+                lastPlasmaColorCached = accent;
+                plasmaPrompt.SetHighlight(highlight, accent);
             }
         }
 
@@ -654,6 +775,17 @@ namespace PacificRimUI
             float curHp = Mathf.Clamp(kaiju.currentHealth, 0f, maxHp);
             float hpRatio = curHp / maxHp;
 
+            if (bossNameText != null)
+            {
+                bossNameText.supportRichText = true;
+                string catShort = string.IsNullOrEmpty(kaiju.kaijuCategoryLabel)
+                    ? string.Empty
+                    : kaiju.kaijuCategoryLabel.Replace("CATEGORY ", "CAT ").Replace(" KAIJU", string.Empty).Trim();
+                bossNameText.text = string.IsNullOrEmpty(catShort)
+                    ? kaiju.kaijuDisplayName
+                    : $"{kaiju.kaijuDisplayName}  <color=#8C96A6><size=10>{catShort}</size></color>";
+            }
+
             if (bossHpNumberText != null)
             {
                 bossHpNumberText.text = $"{PacificRimUITheme.FormatNumber(Mathf.CeilToInt(curHp))} / {PacificRimUITheme.FormatNumber(Mathf.CeilToInt(maxHp))}";
@@ -662,7 +794,7 @@ namespace PacificRimUI
 
             if (bossPhaseText != null)
             {
-                bossPhaseText.text = kaiju.PhaseTitleLabel;
+                bossPhaseText.text = FormatConcisePhase(kaiju);
                 bossPhaseText.color = kaiju.CurrentPhase >= 3
                     ? PacificRimUITheme.Danger
                     : (kaiju.CurrentPhase == 2 ? PacificRimUITheme.Amber : PacificRimUITheme.BlueBright);
@@ -685,8 +817,7 @@ namespace PacificRimUI
             if (bossStatusText != null)
             {
                 bossStatusText.supportRichText = true;
-                string label = kaiju.TacticalStatusLabel;
-                bossStatusText.text = PacificRimUITheme.Track(label, 2, 11, true);
+                bossStatusText.text = FormatConciseBossStatus(kaiju);
                 if (kaiju.IsDead)
                     bossStatusText.color = PacificRimUITheme.Success;
                 else if (kaiju.IsEmpBuffed)
@@ -713,16 +844,18 @@ namespace PacificRimUI
 
             if (kaiju.CurrentPhase > wasKaijuPhase)
             {
+                string overdriveName = kaiju.isSlattern ? "ABYSSAL OVERDRIVE" : "EMP OVERDRIVE";
                 if (kaiju.CurrentPhase == 2)
-                    ShowBanner("ALERT // LEATHERBACK ENTERED PHASE II: BIO-EMP OVERDRIVE", 3.2f);
+                    ShowBanner($"{kaiju.kaijuDisplayName}  ·  PHASE II {overdriveName}", 3.0f);
                 else if (kaiju.CurrentPhase >= 3)
-                    ShowBanner("CRITICAL // LEATHERBACK PHASE III: CATEGORY IV BERSERKER", 3.6f);
+                    ShowBanner($"{kaiju.kaijuDisplayName}  ·  PHASE III BERSERK", 3.2f);
             }
             wasKaijuPhase = kaiju.CurrentPhase;
 
             if (kaiju.IsEmpBuffed && !wasKaijuEmpBuffed)
             {
-                ShowBanner("WARNING // LEATHERBACK BIO-EMP OVERCHARGE", 2.8f);
+                string surgeLabel = kaiju.isSlattern ? "ABYSSAL SURGE" : "EMP SURGE";
+                ShowBanner($"{kaiju.kaijuDisplayName}  ·  {surgeLabel}", 2.5f);
             }
             wasKaijuEmpBuffed = kaiju.IsEmpBuffed;
 
@@ -740,15 +873,46 @@ namespace PacificRimUI
 
                 if (isNewBest)
                 {
-                    ShowBanner($"NEW BEST RECORD! // TIME: {PacificRimCombatRecords.FormatTime(combatElapsedTime)}", 6.0f);
+                    ShowBanner($"NEW BEST  ·  {PacificRimCombatRecords.FormatTime(combatElapsedTime)}", 5.0f);
                     PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDCheatActivated();
                 }
                 else
                 {
-                    ShowBanner($"CATEGORY IV KAIJU NEUTRALIZED // TIME: {PacificRimCombatRecords.FormatTime(combatElapsedTime)}", 5.0f);
+                    ShowBanner($"{kaiju.kaijuDisplayName} NEUTRALIZED  ·  {PacificRimCombatRecords.FormatTime(combatElapsedTime)}", 4.5f);
                 }
             }
             wasKaijuDead = kaiju.IsDead;
+        }
+
+        private static string FormatConcisePhase(KaijuAI k)
+        {
+            if (k.IsDead) return "NEUTRALIZED";
+            if (k.IsAIDisabled) return "AI OFF";
+            if (k.IsBaguvixActive) return "PACIFIST";
+            if (k.isSlattern)
+            {
+                if (k.CurrentPhase == 3) return "PHASE III · JUGGERNAUT";
+                if (k.CurrentPhase == 2) return "PHASE II · BLITZER";
+                return "PHASE I · STALKER";
+            }
+            if (k.CurrentPhase == 3) return "PHASE III · BERSERK";
+            if (k.CurrentPhase == 2) return "PHASE II · OVERDRIVE";
+            return "PHASE I";
+        }
+
+        private static string FormatConciseBossStatus(KaijuAI k)
+        {
+            if (k.IsDead) return "ELIMINATED";
+            if (k.IsAIDisabled) return "OFFLINE";
+            if (k.IsBaguvixActive) return "PASSIVE";
+            if (k.currentState == KaijuAI.AIState.PhaseTransition) return $"PHASE {k.CurrentPhase}";
+            if (k.IsStaggered) return "STAGGERED";
+            if (k.IsMovingGuardActive) return "MOVING GUARD · HEAVY BREAKS";
+            if (k.IsBlocking) return "GUARDING";
+            if (k.IsEmpBuffed) return k.isSlattern ? "ABYSSAL SURGE" : "EMP SURGE";
+            if (k.currentState == KaijuAI.AIState.Retreating) return "RETREATING";
+            if (k.currentState == KaijuAI.AIState.Attacking) return "ATTACKING";
+            return "ENGAGING";
         }
 
         private void UpdateStamina()
@@ -779,7 +943,7 @@ namespace PacificRimUI
 
             if (staminaCaptionText != null)
             {
-                staminaCaptionText.text = jaeger.IsExhausted ? "ACTUATOR EXHAUSTED (<35%)" : "ACTUATOR STAMINA";
+                staminaCaptionText.text = jaeger.IsExhausted ? "EXHAUSTED <35%" : "STAMINA";
                 staminaCaptionText.color = jaeger.IsExhausted ? PacificRimUITheme.Danger : PacificRimUITheme.TextDim;
             }
 
@@ -873,7 +1037,7 @@ namespace PacificRimUI
         {
             if (Time.unscaledTime - lastExhaustedBannerTime < 2.0f) return;
             lastExhaustedBannerTime = Time.unscaledTime;
-            ShowBanner("ACTUATOR EXHAUSTED // RECOVER TO 35% TO ATTACK", 2.2f);
+            ShowBanner("EXHAUSTED  ·  RECOVER TO 35% STAMINA", 2.0f);
         }
 
         private void UpdateBanner()
@@ -916,14 +1080,14 @@ namespace PacificRimUI
 
             if (combatTimerText != null)
             {
-                combatTimerText.text = $"TIME: {PacificRimCombatRecords.FormatTime(combatElapsedTime)}";
+                combatTimerText.text = PacificRimCombatRecords.FormatTime(combatElapsedTime);
                 combatTimerText.color = isCombatTimerRunning ? PacificRimUITheme.BlueBright : PacificRimUITheme.TextDim;
             }
 
             if (bestTimeText != null)
             {
                 float best = PacificRimCombatRecords.GetBestTime();
-                bestTimeText.text = $"BEST: {PacificRimCombatRecords.FormatTime(best)}";
+                bestTimeText.text = $"BEST  {PacificRimCombatRecords.FormatTime(best)}";
                 bestTimeText.color = PacificRimUITheme.Amber;
             }
         }
@@ -964,12 +1128,12 @@ namespace PacificRimUI
                 GameObject bGo = new GameObject("BestTimeText", typeof(RectTransform), typeof(Text));
                 bGo.transform.SetParent(row, false);
                 bestTimeText = bGo.GetComponent<Text>();
-                bestTimeText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                bestTimeText.fontSize = 13;
+                bestTimeText.font = PacificRimUITheme.GetDefaultFont();
+                bestTimeText.fontSize = 12;
                 bestTimeText.alignment = TextAnchor.MiddleRight;
                 bestTimeText.color = PacificRimUITheme.Amber;
                 bestTimeText.raycastTarget = false;
-                bestTimeText.text = $"BEST: {PacificRimCombatRecords.FormatTime(PacificRimCombatRecords.GetBestTime())}";
+                bestTimeText.text = $"BEST  {PacificRimCombatRecords.FormatTime(PacificRimCombatRecords.GetBestTime())}";
                 RectTransform bRt = bGo.GetComponent<RectTransform>();
                 bRt.anchorMin = new Vector2(0f, 0f);
                 bRt.anchorMax = new Vector2(0.52f, 1f);
@@ -980,13 +1144,13 @@ namespace PacificRimUI
                 GameObject tGo = new GameObject("CombatTimerText", typeof(RectTransform), typeof(Text));
                 tGo.transform.SetParent(row, false);
                 combatTimerText = tGo.GetComponent<Text>();
-                combatTimerText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                combatTimerText.font = PacificRimUITheme.GetDefaultFont();
                 combatTimerText.fontSize = 16;
                 combatTimerText.fontStyle = FontStyle.Bold;
                 combatTimerText.alignment = TextAnchor.MiddleRight;
                 combatTimerText.color = PacificRimUITheme.BlueBright;
                 combatTimerText.raycastTarget = false;
-                combatTimerText.text = "TIME: 00:00";
+                combatTimerText.text = "00:00";
                 RectTransform tRt = tGo.GetComponent<RectTransform>();
                 tRt.anchorMin = new Vector2(0.52f, 0f);
                 tRt.anchorMax = new Vector2(1f, 1f);

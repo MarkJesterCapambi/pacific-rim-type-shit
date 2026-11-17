@@ -330,7 +330,8 @@ namespace PacificRimEnvironment
             audio.spatialBlend = 0.85f; // 3D spatialized
             audio.minDistance = 20f;
             audio.maxDistance = 220f;
-            audio.volume = 0.08f; // lowered by 75% for balanced distant atmospheric thud
+            float sfxVol = PacificRimAudio.PacificRimAudioManager.Instance != null ? PacificRimAudio.PacificRimAudioManager.Instance.SfxVolume : 0.55f;
+            audio.volume = 0.16f * sfxVol; // Artificial Ambience: below SFX/Music, above Nature Ambience
             audio.pitch = Random.Range(0.96f, 1.04f); // subtle individual variance
             audio.rolloffMode = AudioRolloffMode.Logarithmic;
             if (Application.isPlaying && !audio.isPlaying)

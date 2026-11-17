@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace PacificRimAudio
 {
@@ -41,12 +42,26 @@ namespace PacificRimAudio
         private readonly List<AudioClip> jaegerLightPunchPool = new List<AudioClip>();
         private readonly List<AudioClip> jaegerHeavyPunchPool = new List<AudioClip>();
         private readonly List<AudioClip> titanFootstepPool = new List<AudioClip>();
+        private readonly List<AudioClip> underwaterFootstepPool = new List<AudioClip>();
         private readonly List<AudioClip> jaegerServoPool = new List<AudioClip>();
         private readonly List<AudioClip> kaijuBitePool = new List<AudioClip>();
         private readonly List<AudioClip> swordImpactPool = new List<AudioClip>();
+        private readonly List<AudioClip> chainswordSlashPool = new List<AudioClip>();
+        private int lastChainswordSlashIndex = -1;
         private readonly List<AudioClip> lightningStrikePool = new List<AudioClip>();
         private readonly List<AudioClip> steamHissPool = new List<AudioClip>();
         private readonly List<AudioClip> uiClickPool = new List<AudioClip>();
+
+        [Header("Scene Audio Mode")]
+        public bool isUnderwaterLevel = false;
+
+        private const string SfxVolumePrefKey = "PR_SFXVolume";
+        private const float DefaultSfxVolume = 0.55f;
+
+        [Header("Master SFX Volume")]
+        [Range(0f, 1f)]
+        [SerializeField] private float sfxVolume = DefaultSfxVolume;
+        public float SfxVolume => sfxVolume;
 
         // AudioSource pool for 3D positional one-shots
         private readonly List<AudioSource> oneShotPool = new List<AudioSource>();
@@ -74,12 +89,65 @@ namespace PacificRimAudio
                 return;
             }
 
+            sfxVolume = Mathf.Clamp01(PlayerPrefs.GetFloat(SfxVolumePrefKey, DefaultSfxVolume));
             LoadClips();
             InitializeAudioSources();
+            RefreshSceneAudioMode(SceneManager.GetActiveScene().name);
+        }
+
+        public void SetSfxVolume(float volume)
+        {
+            sfxVolume = Mathf.Clamp01(volume);
+            PlayerPrefs.SetFloat(SfxVolumePrefKey, sfxVolume);
+            PlayerPrefs.Save();
+
+            if (stormAmbienceSource != null)
+            {
+                stormAmbienceSource.volume = (isUnderwaterLevel ? 0.06f : 0.04f) * sfxVolume;
+            }
+            if (jaegerRocketBurnSource != null)
+            {
+                jaegerRocketBurnSource.volume = 0.85f * sfxVolume;
+            }
+            if (kaijuEmpSparksSource != null)
+            {
+                kaijuEmpSparksSource.volume = 0.65f * sfxVolume;
+            }
+        }
+
+        private void OnEnable()
+        {
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        private void OnDisable()
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
+
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            RefreshSceneAudioMode(scene.name);
+        }
+
+        public void RefreshSceneAudioMode(string sceneName)
+        {
+            bool isCutscene = !string.IsNullOrEmpty(sceneName) &&
+                              sceneName.IndexOf("Cutscene", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            isUnderwaterLevel = !isCutscene &&
+                                !string.IsNullOrEmpty(sceneName) &&
+                                sceneName.IndexOf("Operation Pitfall", System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (stormAmbienceSource != null)
+            {
+                stormAmbienceSource.pitch = isUnderwaterLevel ? 0.62f : 1.0f;
+                stormAmbienceSource.volume = (isUnderwaterLevel ? 0.06f : 0.04f) * sfxVolume;
+            }
         }
 
         private void Start()
         {
+            RefreshSceneAudioMode(SceneManager.GetActiveScene().name);
             StartStormAmbience();
             StartJaegerTurbine();
         }
@@ -180,6 +248,12 @@ namespace PacificRimAudio
             AddIfExists(titanFootstepPool, "water_splash02");
             AddIfExists(titanFootstepPool, "water_splash03");
 
+            // 3b. Underwater Jaeger Footsteps (Operation Pitfall)
+            underwaterFootstepPool.Clear();
+            AddIfExists(underwaterFootstepPool, "JaegerFootstep1");
+            AddIfExists(underwaterFootstepPool, "JaegerFootstep2");
+            AddIfExists(underwaterFootstepPool, "JaegerFootstep3");
+
             // 4. Hydraulic Servos
             jaegerServoPool.Clear();
             AddIfExists(jaegerServoPool, "JaegerHydraulicServo_01");
@@ -192,13 +266,17 @@ namespace PacificRimAudio
             AddIfExists(kaijuBitePool, "Monster Bite");
             AddIfExists(kaijuBitePool, "KaijuAttackGrunt_01");
 
-            // 6. Sword / Blade Clashes
+            // 6. Sword / Blade Clashes & Chainsword Slashes
             swordImpactPool.Clear();
             for (int i = 1; i <= 7; i++)
             {
                 AddIfExists(swordImpactPool, $"Sword_hitting the armor {i}");
                 AddIfExists(swordImpactPool, $"Sword_hitting the sword {i}");
             }
+            chainswordSlashPool.Clear();
+            AddIfExists(chainswordSlashPool, "Slash1");
+            AddIfExists(chainswordSlashPool, "Slash2");
+            AddIfExists(chainswordSlashPool, "Slash3");
 
             // 7. Thunder / Lightning Strikes
             lightningStrikePool.Clear();
@@ -237,6 +315,7 @@ namespace PacificRimAudio
             uiAudioSource.playOnAwake = false;
             uiAudioSource.spatialBlend = 0f;
             uiAudioSource.ignoreListenerPause = true;
+            uiAudioSource.bypassListenerEffects = true;
 
             // Dedicated Loops (Lowered background rainfall/storm ambience by 75% to 0.05f)
             stormAmbienceSource = CreateLoopSource("StormAmbienceLoop", 0.05f);
@@ -255,6 +334,11 @@ namespace PacificRimAudio
                 src.maxDistance = 500f;
                 src.dopplerLevel = 0.2f;
                 oneShotPool.Add(src);
+            }
+
+            if (GetComponent<PacificRimMusicManager>() == null)
+            {
+                gameObject.AddComponent<PacificRimMusicManager>();
             }
         }
 
@@ -280,7 +364,7 @@ namespace PacificRimAudio
         }
 
         #region 3D One-Shot Playback
-        public void PlayAtPosition(AudioClip clip, Vector3 position, float volume = 1f, float pitchMin = 0.95f, float pitchMax = 1.05f)
+        public void PlayAtPosition(AudioClip clip, Vector3 position, float volume = 1f, float pitchMin = 0.95f, float pitchMax = 1.05f, bool bypassLowPass = false)
         {
             if (clip == null) return;
 
@@ -301,8 +385,9 @@ namespace PacificRimAudio
 
             available.transform.position = position;
             available.pitch = Random.Range(pitchMin, pitchMax);
-            available.volume = Mathf.Clamp01(volume);
-            available.PlayOneShot(clip, volume);
+            available.bypassListenerEffects = bypassLowPass;
+            available.volume = Mathf.Clamp01(volume * sfxVolume);
+            available.PlayOneShot(clip, 1f);
         }
 
         public void PlayAtPosition(string clipName, Vector3 position, float volume = 1f, float pitchMin = 0.95f, float pitchMax = 1.05f)
@@ -320,7 +405,7 @@ namespace PacificRimAudio
             if (clip != null && uiAudioSource != null)
             {
                 uiAudioSource.pitch = pitch;
-                uiAudioSource.PlayOneShot(clip, volume);
+                uiAudioSource.PlayOneShot(clip, Mathf.Clamp01(volume * sfxVolume));
             }
         }
         #endregion
@@ -328,8 +413,14 @@ namespace PacificRimAudio
         #region High-Level Game Audio Hooks
 
         // 1. Jaeger Melee Impacts
-        public void PlayJaegerPunchHit(Vector3 hitPos, bool isHeavy)
+        public void PlayJaegerPunchHit(Vector3 hitPos, bool isHeavy, bool isChainsword = false)
         {
+            if (isChainsword && chainswordSlashPool.Count > 0)
+            {
+                PlayChainswordSlash(hitPos, isHeavy);
+                return;
+            }
+
             if (isHeavy && jaegerHeavyPunchPool.Count > 0)
             {
                 var clip = jaegerHeavyPunchPool[Random.Range(0, jaegerHeavyPunchPool.Count)];
@@ -340,6 +431,20 @@ namespace PacificRimAudio
                 var clip = jaegerLightPunchPool[Random.Range(0, jaegerLightPunchPool.Count)];
                 PlayAtPosition(clip, hitPos, volume: 0.85f, pitchMin: 0.95f, pitchMax: 1.06f);
             }
+        }
+
+        public void PlayChainswordSlash(Vector3 hitPos, bool isHeavy)
+        {
+            if (chainswordSlashPool.Count == 0) return;
+
+            int idx = Random.Range(0, chainswordSlashPool.Count);
+            if (chainswordSlashPool.Count > 1 && idx == lastChainswordSlashIndex)
+            {
+                idx = (idx + Random.Range(1, chainswordSlashPool.Count)) % chainswordSlashPool.Count;
+            }
+            lastChainswordSlashIndex = idx;
+            var clip = chainswordSlashPool[idx];
+            PlayAtPosition(clip, hitPos, volume: isHeavy ? 1.0f : 0.92f, pitchMin: isHeavy ? 0.90f : 0.96f, pitchMax: isHeavy ? 1.00f : 1.05f, bypassLowPass: isUnderwaterLevel);
         }
 
         // 2. Attack Air Whoosh
@@ -428,9 +533,16 @@ namespace PacificRimAudio
             PlayAtPosition("Metal Impact 7", pos, volume: 1.05f, pitchMin: 1.05f, pitchMax: 1.15f);
         }
 
-        // 5. Ocean Footsteps
+        // 5. Ocean & Seabed Footsteps
         public void PlayOceanFootstep(Vector3 pos, float intensity = 1f)
         {
+            if (isUnderwaterLevel && underwaterFootstepPool.Count > 0)
+            {
+                var uwClip = underwaterFootstepPool[Random.Range(0, underwaterFootstepPool.Count)];
+                PlayAtPosition(uwClip, pos, volume: Mathf.Clamp01(0.85f * intensity), pitchMin: 0.94f, pitchMax: 1.04f);
+                return;
+            }
+
             if (titanFootstepPool.Count > 0)
             {
                 var clip = titanFootstepPool[Random.Range(0, titanFootstepPool.Count)];
@@ -524,12 +636,12 @@ namespace PacificRimAudio
             }
         }
 
-        public void PlayLightningStrike(Vector3 pos)
+        public void PlayLightningStrike(Vector3 pos, float volume = 1.0f)
         {
             if (lightningStrikePool.Count > 0)
             {
                 var clip = lightningStrikePool[Random.Range(0, lightningStrikePool.Count)];
-                PlayAtPosition(clip, pos, volume: 1.0f, pitchMin: 0.90f, pitchMax: 1.10f);
+                PlayAtPosition(clip, pos, volume: volume, pitchMin: 0.90f, pitchMax: 1.10f);
             }
         }
 
@@ -623,7 +735,7 @@ namespace PacificRimAudio
                     StartJaegerTurbine();
                 }
                 jaegerTurbineSource.pitch = Mathf.Lerp(0.85f, 1.40f, normalizedSpeed);
-                jaegerTurbineSource.volume = Mathf.Lerp(0.22f, 0.48f, normalizedSpeed);
+                jaegerTurbineSource.volume = Mathf.Lerp(0.22f, 0.48f, normalizedSpeed) * sfxVolume;
             }
         }
 

@@ -8,6 +8,7 @@ namespace PacificRimWater
     /// Simulates footstep shockwaves, dual-leg ocean parting bow wakes, water eruptions,
     /// and viscous hydrodynamic drag for giant mechs wading through thigh-deep ocean water.
     /// </summary>
+    [DefaultExecutionOrder(-10)]
     public class JaegerWaterInteraction : MonoBehaviour
     {
         [Header("Animation-Synced Footsteps")]
@@ -191,17 +192,37 @@ namespace PacificRimWater
 
         void Update()
         {
+            Vector3 currentPos = transform.position;
+            Vector3 vel = GetMovementVelocity();
+            float horizontalSpeed = new Vector3(vel.x, 0f, vel.z).magnitude;
+
             if (water == null)
             {
                 water = WaterSystem.Instance;
-                if (water == null)
-                {
-                    IsWading = false;
-                    return;
-                }
             }
 
-            Vector3 currentPos = transform.position;
+            bool isDeepUnderwaterMode = (water == null) || (WaterSplashManager.Instance != null && WaterSplashManager.Instance.IsDeepUnderwater);
+            if (water == null)
+            {
+                IsWading = false;
+                SubmergedDepth = isDeepUnderwaterMode ? 60f : 0f;
+
+                if (horizontalSpeed > 0.45f && WaterSplashManager.Instance != null)
+                {
+                    wakeTrailAccumulator += horizontalSpeed * Time.deltaTime;
+                    if (wakeTrailAccumulator >= Mathf.Max(0.35f, wakeTrailStepDistance * 1.15f))
+                    {
+                        wakeTrailAccumulator = 0f;
+                        Vector3 lPos = leftFootTransform != null ? leftFootTransform.position : (currentPos - transform.right * footSpacing);
+                        Vector3 rPos = rightFootTransform != null ? rightFootTransform.position : (currentPos + transform.right * footSpacing);
+                        WaterSplashManager.Instance.SpawnUnderwaterWakeBubbles(lPos, rPos, vel, horizontalSpeed);
+                    }
+                }
+
+                prevPos = currentPos;
+                return;
+            }
+
             float oceanSurfaceY = water.GetWaterHeight(currentPos);
             SubmergedDepth = oceanSurfaceY - currentPos.y;
 
@@ -209,6 +230,7 @@ namespace PacificRimWater
             RightLegSurfacePoint = ComputeLegWaterlinePoint(rightShinTransform, rightThighTransform, 1f, oceanSurfaceY);
 
             bool inWater = SubmergedDepth > 0.1f;
+            bool isFullySubmerged = SubmergedDepth > 24.5f || (WaterSplashManager.Instance != null && WaterSplashManager.Instance.IsDeepUnderwater);
 
             if (inWater && !wasInWater)
             {
@@ -221,12 +243,9 @@ namespace PacificRimWater
                 OnExitOcean?.Invoke();
             }
 
-            IsWading = inWater;
+            IsWading = inWater && !isFullySubmerged;
 
-            Vector3 vel = GetMovementVelocity();
-            float horizontalSpeed = new Vector3(vel.x, 0f, vel.z).magnitude;
-
-            if (inWater)
+            if (inWater && !isFullySubmerged)
             {
                 // Distance-based fallback footstep shockwave only if animator is missing
                 if (!useAnimationSyncedFootsteps || animator == null)
@@ -295,14 +314,6 @@ namespace PacificRimWater
             prevPos = currentPos;
         }
 
-        private bool leftFootAirborne = false;
-        private bool rightFootAirborne = false;
-        private float prevLeftFootY = 0f;
-        private float prevRightFootY = 0f;
-        private float lastLeftStepTime = -1f;
-        private float lastRightStepTime = -1f;
-        private bool feetTrackingInitialized = false;
-
         void LateUpdate()
         {
             if (!useAnimationSyncedFootsteps) return;
@@ -317,83 +328,25 @@ namespace PacificRimWater
             Vector3 vel = GetMovementVelocity();
             float horizontalSpeed = new Vector3(vel.x, 0f, vel.z).magnitude;
             float animSpeed = 0f;
+            float walkDir = 1f;
+            float runBlend = 0f;
             try { animSpeed = animator.GetFloat("Speed"); } catch { }
-            bool isLocomoting = animSpeed > 0.08f || horizontalSpeed > 0.35f;
+            try { walkDir = animator.GetFloat("WalkDirection"); } catch { }
+            try { runBlend = animator.GetFloat("RunBlend"); } catch { }
+            if (Mathf.Abs(walkDir) < 0.1f) walkDir = 1f;
 
-            // Transform foot world positions into Jaeger root local space
-            Vector3 localPosL = transform.InverseTransformPoint(leftFootTransform.position);
-            Vector3 localPosR = transform.InverseTransformPoint(rightFootTransform.position);
-
-            if (!feetTrackingInitialized)
-            {
-                prevLeftFootY = localPosL.y;
-                prevRightFootY = localPosR.y;
-                feetTrackingInitialized = true;
-                return;
-            }
+            bool isDashing = controller != null && controller.IsDashing;
+            bool isLocomoting = !isDashing && (animSpeed > 0.08f || horizontalSpeed > 0.35f);
 
             if (!isLocomoting)
             {
-                leftFootAirborne = false;
-                rightFootAirborne = false;
-                prevLeftFootY = localPosL.y;
-                prevRightFootY = localPosR.y;
+                leftTracker.ResetAirborne();
+                rightTracker.ResetAirborne();
                 return;
             }
 
-            float now = Time.time;
-            bool isRunning = (controller != null && controller.isRunning);
-            float minSameFootInterval = isRunning ? 0.30f : 0.50f;
-            float crossFootMinInterval = 0.16f;
-
-            // 1. Swing / Lift Phase: foot clearly lifts off the ground into swing phase
-            if (!leftFootAirborne && localPosL.y > 1.85f)
-            {
-                leftFootAirborne = true;
-            }
-            if (!rightFootAirborne && localPosR.y > 1.85f)
-            {
-                rightFootAirborne = true;
-            }
-
-            // 2. Touchdown / Impact Phase: descending foot enters ground contact zone (<= 1.48m)
-            // Left Foot Strike
-            if (leftFootAirborne && localPosL.y <= 1.48f && localPosL.y <= (prevLeftFootY + 0.02f))
-            {
-                if ((now - lastLeftStepTime >= minSameFootInterval) && (now - lastRightStepTime >= crossFootMinInterval))
-                {
-                    leftFootAirborne = false;
-                    lastLeftStepTime = now;
-                    TriggerFootPlant(leftFootTransform, true, horizontalSpeed);
-                }
-            }
-
-            // Right Foot Strike
-            if (rightFootAirborne && localPosR.y <= 1.48f && localPosR.y <= (prevRightFootY + 0.02f))
-            {
-                if ((now - lastRightStepTime >= minSameFootInterval) && (now - lastLeftStepTime >= crossFootMinInterval))
-                {
-                    rightFootAirborne = false;
-                    lastRightStepTime = now;
-                    TriggerFootPlant(rightFootTransform, false, horizontalSpeed);
-                }
-            }
-
-            prevLeftFootY = localPosL.y;
-            prevRightFootY = localPosR.y;
-        }
-
-        private static bool HasCrossedThreshold(float prev, float curr, float threshold)
-        {
-            if (prev <= curr)
-            {
-                return prev < threshold && curr >= threshold;
-            }
-            else
-            {
-                // Wrapped around 1.0 -> 0.0
-                return prev < threshold || curr >= threshold;
-            }
+            UpdateFootStepTracker(ref leftTracker, leftFootTransform, true, walkDir, runBlend, horizontalSpeed, dt);
+            UpdateFootStepTracker(ref rightTracker, rightFootTransform, false, walkDir, runBlend, horizontalSpeed, dt);
         }
 
         private void TriggerFootPlant(Transform footBone, bool isLeft, float horizontalSpeed)
@@ -409,7 +362,8 @@ namespace PacificRimWater
                 footContact = transform.position + footOffset;
             }
 
-            if (water != null)
+            bool isDeepUnderwater = SubmergedDepth > 24.5f || (WaterSplashManager.Instance != null && WaterSplashManager.Instance.IsDeepUnderwater);
+            if (water != null && !isDeepUnderwater)
             {
                 footContact.y = water.GetWaterHeight(footContact);
             }
@@ -423,7 +377,9 @@ namespace PacificRimWater
         private void UpdateFootStepTracker(
             ref FootStepTracker tracker,
             Transform footTransform,
+            bool isLeft,
             float walkDir,
+            float runBlend,
             float horizontalSpeed,
             float dt)
         {
@@ -447,13 +403,12 @@ namespace PacificRimWater
             float rawVelY = (localPos.y - tracker.prevLocalPos.y) / dt;
             float rawSignedVelZ = ((localPos.z - tracker.prevLocalPos.z) / dt) * walkDir;
             float prevVelY = tracker.smoothedVelY;
-            float prevSignedVelZ = tracker.smoothedSignedVelZ;
 
-            float smoothAlpha = 1f - Mathf.Exp(-22f * dt);
+            float smoothAlpha = 1f - Mathf.Exp(-24f * dt);
             tracker.smoothedVelY = Mathf.Lerp(tracker.smoothedVelY, rawVelY, smoothAlpha);
             tracker.smoothedSignedVelZ = Mathf.Lerp(tracker.smoothedSignedVelZ, rawSignedVelZ, smoothAlpha);
 
-            // Fast adaptation to actual foot trajectory extremes (never gets stuck between walk and run)
+            // Fast adaptation to actual foot trajectory extremes (walk vs run vs strafe)
             float relaxRate = dt * 1.5f;
             tracker.minY = Mathf.Min(Mathf.Lerp(tracker.minY, localPos.y, relaxRate), localPos.y);
             tracker.maxY = Mathf.Max(Mathf.Lerp(tracker.maxY, localPos.y, relaxRate), localPos.y);
@@ -463,10 +418,10 @@ namespace PacificRimWater
             float yRange = Mathf.Max(0.20f, tracker.maxY - tracker.minY);
             float normY = Mathf.Clamp01((localPos.y - tracker.minY) / yRange);
 
-            // Arm lift phase: foot lifted off baseline (either relative normY >= 0.35f or absolute local Y >= 2.0f)
+            // Arm lift phase: foot clearly lifted off baseline into swing
             if (!tracker.isAirborne)
             {
-                if (normY >= 0.35f || localPos.y >= 2.0f)
+                if (localPos.y >= 1.82f || (yRange > 0.45f && normY >= 0.38f))
                 {
                     tracker.isAirborne = true;
                     tracker.peakDescentSpeed = 0f;
@@ -481,31 +436,24 @@ namespace PacificRimWater
                 }
 
                 float now = Time.time;
-                // Touchdown inflection: descending foot reaches bottom minimum (low normY or low local Y, velocity turning upward)
-                bool isAtBottom = (normY <= 0.20f || localPos.y <= 1.58f);
-                bool velocityZeroCrossing = prevVelY < -0.04f && tracker.smoothedVelY >= -0.06f;
-                bool verticalImpact = isAtBottom && velocityZeroCrossing;
+                float groundContactY = Mathf.Lerp(1.38f, 1.48f, Mathf.Clamp01(runBlend));
+                bool isAtBottom = localPos.y <= groundContactY || (yRange > 0.45f && normY <= 0.14f && localPos.y <= 1.54f);
+                // Exclude mid-air forward swing dips (e.g., Gipsy.Run left leg passing forward at +velZ)
+                bool isPlanting = tracker.smoothedSignedVelZ <= 0.85f;
+                bool decelerationTouchdown = (prevVelY < -0.15f && tracker.smoothedVelY >= -0.95f) || localPos.y <= 1.35f;
 
-                bool canTrigger = (now - tracker.lastStrikeTime >= minFootstepInterval) &&
-                                  (now - lastAnyFootstepTime >= crossFootMinInterval);
+                float effectiveMinSame = Mathf.Max(0.28f, minFootstepInterval);
+                float effectiveCrossMin = Mathf.Max(0.16f, crossFootMinInterval);
+                bool canTrigger = (now - tracker.lastStrikeTime >= effectiveMinSame) &&
+                                  (now - lastAnyFootstepTime >= effectiveCrossMin);
 
-                if (verticalImpact && canTrigger)
+                if (isAtBottom && isPlanting && decelerationTouchdown && canTrigger)
                 {
                     tracker.isAirborne = false;
                     tracker.lastStrikeTime = now;
                     lastAnyFootstepTime = now;
 
-                    Vector3 footContact = footTransform.position;
-                    if (water != null)
-                    {
-                        footContact.y = water.GetWaterHeight(footContact);
-                    }
-
-                    float speedFactor = Mathf.Clamp(horizontalSpeed / 8.5f, 0.7f, 1.35f);
-                    float descentFactor = Mathf.Clamp(0.85f + tracker.peakDescentSpeed * 0.12f, 0.8f, 1.25f);
-                    float dynamicStrength = footstepWaveStrength * speedFactor * descentFactor;
-
-                    TriggerFootstepImpact(footContact, footstepWaveRadius, dynamicStrength);
+                    TriggerFootPlant(footTransform, isLeft, horizontalSpeed);
                     tracker.peakDescentSpeed = 0f;
                 }
             }
@@ -550,7 +498,8 @@ namespace PacificRimWater
         /// </summary>
         public void TriggerFootstepImpact(Vector3 contactPoint, float radius, float strength, bool triggerCameraShake = true)
         {
-            if (water != null)
+            bool isDeepUnderwater = SubmergedDepth > 24.5f || (WaterSplashManager.Instance != null && WaterSplashManager.Instance.IsDeepUnderwater);
+            if (water != null && !isDeepUnderwater)
             {
                 bool isHeavyLunge = controller != null && controller.IsSprintAttacking;
                 float finalRadius = isHeavyLunge ? Mathf.Max(radius, 26f) : radius;
@@ -568,8 +517,18 @@ namespace PacificRimWater
 
             if (triggerCameraShake && footstepShakeIntensity > 0f)
             {
-                float multiplier = (controller != null && controller.isRunning) ? 1.55f : 1.0f;
-                DoCameraShake(footstepShakeIntensity * multiplier, footstepShakeDuration * multiplier);
+                float multiplier = (controller != null && controller.isRunning) ? 1.45f : 1.0f;
+                float shakeDuration = footstepShakeDuration * ((controller != null && controller.isRunning) ? 1.25f : 1.0f);
+
+                // Keep Operation Pitfall intro cutscene tracking camera subtle so footsteps feel weighty without jarring close-up shots
+                if (PacificRimCutscene.OperationPitfallIntroCutscene.Instance != null &&
+                    PacificRimCutscene.OperationPitfallIntroCutscene.Instance.isCutsceneRunning)
+                {
+                    multiplier *= 0.22f;
+                    shakeDuration *= 0.70f;
+                }
+
+                DoCameraShake(footstepShakeIntensity * multiplier, shakeDuration);
             }
 
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayOceanFootstep(contactPoint, (controller != null && controller.isRunning) ? 1.35f : 1.0f);
@@ -623,14 +582,17 @@ namespace PacificRimWater
     /// <summary>
     /// Multi-channel non-destructive camera feedback controller for Pacific Rim footsteps,
     /// directional attack swing weight, and hit-vs-miss impact vibrations.
-    /// Exposes camera-local CurrentOffset and CurrentRotationOffset for JaegerCameraFollow.
+    /// Runs in LateUpdate after JaegerWaterInteraction (-10) and before JaegerCameraFollow (50)
+    /// so every footstep shake applies on the exact frame of touchdown with zero frame lag.
     /// </summary>
+    [DefaultExecutionOrder(10)]
     public class PacificRimCameraShake : MonoBehaviour
     {
         // Channel 1: Low-frequency footstep / ground rumble
         private float rumbleTime;
         private float rumbleDuration;
         private float rumbleMagnitude;
+        private float rumbleElapsed;
         private float rumbleSeed;
 
         // Channel 2: Smooth directional attack follow-through (punch / heavy arc weight)
@@ -647,6 +609,10 @@ namespace PacificRimWater
         private float vibFrequency = 32f;
         private float vibSeed;
 
+        // Channel 4: Continuous capacitor charge-up rumble for the I-19 Plasmacaster
+        private float chargeTremorIntensity;
+        private float chargeTremorSeed;
+
         public Vector3 CurrentOffset { get; private set; }
         public Vector3 CurrentRotationOffset { get; private set; }
 
@@ -662,6 +628,7 @@ namespace PacificRimWater
                 rumbleMagnitude = magnitude;
                 rumbleDuration = clampedDur;
                 rumbleTime = clampedDur;
+                rumbleElapsed = 0f;
                 rumbleSeed = Random.Range(0f, 100f);
             }
         }
@@ -704,6 +671,40 @@ namespace PacificRimWater
             swingElapsed = 0f;
             swingPeakPos = new Vector3(0f, 0.18f, -0.25f);
             swingPeakRot = new Vector3(0.85f, 0f, 0f);
+        }
+
+        /// <summary>
+        /// Sets continuous high-frequency cockpit rumble while charging the I-19 Plasmacaster (0 = off, 1 = peak saturation).
+        /// </summary>
+        public void SetPlasmaChargeTremor(float intensity)
+        {
+            float clamped = Mathf.Clamp01(intensity);
+            if (clamped > 0.001f && chargeTremorIntensity <= 0.001f)
+            {
+                chargeTremorSeed = Random.Range(0f, 100f);
+            }
+            chargeTremorIntensity = clamped;
+        }
+
+        /// <summary>
+        /// Heavy backward cannon kick and sonic shockwave vibration when the I-19 Plasmacaster fires.
+        /// </summary>
+        public void TriggerPlasmaDischargeFeedback()
+        {
+            chargeTremorIntensity = 0f;
+            Shake(0.95f, 0.48f);
+
+            swingDuration = 0.56f;
+            swingElapsed = 0f;
+            swingPeakPos = new Vector3(0.45f, -0.28f, -0.92f);
+            swingPeakRot = new Vector3(-2.60f, 1.85f, -1.65f);
+
+            vibSeed = Random.Range(0f, 100f);
+            vibDuration = 0.46f;
+            vibTime = vibDuration;
+            vibPosAmplitude = 0.58f;
+            vibRotAmplitude = 2.45f;
+            vibFrequency = 36f;
         }
 
         /// <summary>
@@ -822,28 +823,35 @@ namespace PacificRimWater
             }
         }
 
-        void Update()
+        void LateUpdate()
         {
             Vector3 totalPos = Vector3.zero;
             Vector3 totalRot = Vector3.zero;
 
-            // 1. Footstep rumble channel (Heavier colossus impact with vertical drop, lateral heave, and pitch dip)
+            // 1. Footstep rumble channel (Phase-locked downward thud at impact followed by damped seismic decay)
             if (rumbleTime > 0f && rumbleDuration > 0f)
             {
-                rumbleTime = Mathf.Max(0f, rumbleTime - Time.deltaTime);
+                float dt = Time.deltaTime;
+                rumbleTime = Mathf.Max(0f, rumbleTime - dt);
+                rumbleElapsed += dt;
                 float damper = rumbleTime / rumbleDuration;
                 float decay = damper * damper;
-                float t = (Time.time + rumbleSeed) * 14f;
+
+                float impactWindow = Mathf.Min(0.14f, rumbleDuration * 0.65f);
+                float impactEnv = impactWindow > 0.001f && rumbleElapsed < impactWindow
+                    ? Mathf.Sin((rumbleElapsed / impactWindow) * Mathf.PI)
+                    : 0f;
+                float t = rumbleElapsed * 28f;
 
                 Vector3 rumbleDir = new Vector3(
-                    Mathf.Sin(t * 1.13f) * 0.55f,
-                    Mathf.Cos(t * 1.47f) * 1.25f,
-                    Mathf.Sin(t * 0.79f) * 0.45f);
+                    Mathf.Sin(t * 1.13f + rumbleSeed) * 0.42f * decay,
+                    -impactEnv * 1.15f + Mathf.Sin(t * 1.47f) * 0.55f * decay,
+                    Mathf.Sin(t * 0.79f + rumbleSeed * 0.5f) * 0.35f * decay);
 
-                totalPos += rumbleDir * (rumbleMagnitude * decay);
-                totalRot.x += -Mathf.Abs(rumbleDir.y) * rumbleMagnitude * 2.2f * damper;
-                totalRot.y += Mathf.Sin(t * 1.05f) * rumbleMagnitude * 1.2f * damper;
-                totalRot.z += Mathf.Cos(t * 0.95f) * rumbleMagnitude * 1.4f * damper;
+                totalPos += rumbleDir * rumbleMagnitude;
+                totalRot.x += (-impactEnv * 2.4f + Mathf.Sin(t * 1.25f) * 0.8f * decay) * rumbleMagnitude;
+                totalRot.y += Mathf.Sin(t * 1.05f + rumbleSeed) * rumbleMagnitude * 0.9f * decay;
+                totalRot.z += Mathf.Cos(t * 0.95f + rumbleSeed) * rumbleMagnitude * 1.1f * decay;
             }
 
             // 2. Smooth directional swing weight envelope
@@ -875,6 +883,24 @@ namespace PacificRimWater
 
                 totalPos += vibDir * (vibPosAmplitude * decay);
                 totalRot += vibRot * (vibRotAmplitude * decay);
+            }
+
+            // 4. Continuous Plasmacaster capacitor charge tremor
+            if (chargeTremorIntensity > 0.001f)
+            {
+                float sq = chargeTremorIntensity * chargeTremorIntensity;
+                float cw = (Time.time + chargeTremorSeed) * Mathf.Lerp(26f, 56f, chargeTremorIntensity) * Mathf.PI * 2f;
+                Vector3 cPos = new Vector3(
+                    Mathf.Sin(cw * 1.11f),
+                    Mathf.Cos(cw * 1.37f + 0.5f),
+                    Mathf.Sin(cw * 0.79f + 1.4f) * 0.55f) * (0.16f * sq);
+                Vector3 cRot = new Vector3(
+                    Mathf.Sin(cw * 1.23f + 0.8f),
+                    Mathf.Cos(cw * 0.91f + 1.7f),
+                    Mathf.Sin(cw * 1.41f + 2.3f)) * (0.72f * sq);
+
+                totalPos += cPos;
+                totalRot += cRot;
             }
 
             CurrentOffset = totalPos;

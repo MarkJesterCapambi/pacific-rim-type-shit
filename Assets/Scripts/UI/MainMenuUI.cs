@@ -11,13 +11,19 @@ namespace PacificRimUI
         public static MainMenuUI Instance { get; private set; }
         public static bool IsMenuOpen => Instance != null && Instance.isMenuOpen;
 
+        public const string Level1SceneName = "Save Striker Eureka";
+        public const string Level2SceneName = "Operation Pitfall";
+        public const string Level2CutsceneSceneName = "Operation Pitfall Cutscene";
+
         [Header("Scene Routing")]
         [Tooltip("True if this menu is running in the dedicated Main Menu scene.")]
         public bool isMainMenuScene = false;
-        [Tooltip("Scene loaded when clicking DEPLOY JAEGER or pressing Play.")]
-        public string gameplaySceneName = "SampleScene";
+        [Tooltip("Scene loaded when clicking DEPLOY or pressing Play.")]
+        public string gameplaySceneName = Level1SceneName;
         [Tooltip("Scene loaded when returning to the Main Menu.")]
         public string mainMenuSceneName = "MainMenuScene";
+        [Tooltip("0 = Save Striker Eureka, 1 = Operation Pitfall")]
+        public int selectedMissionIndex = 0;
 
         [Header("Canvas & Paneling")]
         [SerializeField] private GameObject menuVisualsRoot;
@@ -33,6 +39,7 @@ namespace PacificRimUI
         [SerializeField] private PacificRimButton deployButton;
         [SerializeField] private PacificRimButton controlsButton;
         [SerializeField] private PacificRimButton specsButton;
+        [SerializeField] private PacificRimButton audioButton;
         [SerializeField] private PacificRimButton restartButton;
         [SerializeField] private PacificRimButton exitButton;
         [SerializeField] private PacificRimButton returnToMenuButton;
@@ -44,9 +51,17 @@ namespace PacificRimUI
         [SerializeField] private UnityEngine.UI.Text pauseMissionText;
         [SerializeField] private UnityEngine.UI.Text menuBestTimeText;
 
+        [Header("Main Menu Operation Briefing")]
+        [SerializeField] private UnityEngine.UI.Text menuMainSubtitleText;
+        [SerializeField] private UnityEngine.UI.Text briefingText;
+        [SerializeField] private UnityEngine.UI.Text opRowTitleValue;
+        [SerializeField] private UnityEngine.UI.Text opRowThreatValue;
+        [SerializeField] private UnityEngine.UI.Text opRowBestValue;
+
         [Header("Modals")]
         [SerializeField] private PacificRimModal controlsModal;
         [SerializeField] private PacificRimModal specsModal;
+        [SerializeField] private PacificRimModal audioModal;
 
         [Header("HUD Link")]
         [SerializeField] private JaegerHUD jaegerHud;
@@ -68,12 +83,15 @@ namespace PacificRimUI
             {
                 isMainMenuScene = true;
             }
-            else if (!string.IsNullOrEmpty(gameplaySceneName) && currentScene.Equals(gameplaySceneName, System.StringComparison.OrdinalIgnoreCase))
+            else
             {
                 isMainMenuScene = false;
+                if (!string.IsNullOrEmpty(currentScene))
+                {
+                    gameplaySceneName = currentScene;
+                }
             }
 
-            // Keep MainMenu_Root always active so Update() can always listen for Esc.
             if (!gameObject.activeSelf)
                 gameObject.SetActive(true);
         }
@@ -81,44 +99,28 @@ namespace PacificRimUI
         private void Start()
         {
             BindListeners();
+            PacificRimAudioSettingsUI.AttachToMenu(menuVisualsRoot);
 
             if (isMainMenuScene)
             {
-                // Pre-warm main menu shaders, audio, and cache in the background
                 PacificRimLoadingScreen.WarmupMainMenuAssets();
 
                 isMenuOpen = true;
                 SetMenuState(true);
-                if (deployButton != null)
-                {
-                    deployButton.SetText("DEPLOY JAEGER");
-                }
                 if (exitButton != null)
                 {
-                    exitButton.SetText("DISENGAGE");
+                    exitButton.SetText("EXIT");
                 }
-                if (pauseTitleText != null)
-                {
-                    pauseTitleText.text = "PACIFIC RIM: OPERATION PITFALL";
-                    pauseTitleText.color = PacificRimUITheme.BlueBright;
-                }
-                if (pauseSubtitleText != null)
-                {
-                    pauseSubtitleText.text = "PPDC TACTICAL COMMAND // MISSION: DEFEND STRIKER EUREKA";
-                }
-                if (pauseMissionText != null)
-                {
-                    pauseMissionText.text = "MISSION OBJECTIVE: INTERCEPT LEATHERBACK // SAVE STRIKER EUREKA";
-                }
+                SelectMission(selectedMissionIndex, playSound: false);
             }
             else
             {
-                // In gameplay scene: start directly in combat with HUD visible
+                bool isPitfall = IsOperationPitfallActive();
                 isMenuOpen = false;
                 SetMenuState(false);
                 if (deployButton != null)
                 {
-                    deployButton.SetText("RESUME MISSION");
+                    deployButton.SetText("RESUME");
                 }
                 if (exitButton != null)
                 {
@@ -126,27 +128,27 @@ namespace PacificRimUI
                 }
                 if (pauseTitleText != null)
                 {
-                    pauseTitleText.text = "PACIFIC RIM: OPERATION PITFALL // TACTICAL PAUSE";
+                    pauseTitleText.text = "PAUSED";
                 }
                 if (pauseSubtitleText != null)
                 {
-                    pauseSubtitleText.text = "MISSION DIRECTIVE // DEFEND STRIKER EUREKA";
+                    pauseSubtitleText.text = isPitfall
+                        ? "OP 02  ·  OPERATION PITFALL"
+                        : "OP 01  ·  SAVE STRIKER EUREKA";
                 }
                 if (jaegerHud != null)
                 {
-                    jaegerHud.ShowBanner("MISSION: SAVE STRIKER EUREKA // ENGAGE LEATHERBACK", 4.0f);
+                    jaegerHud.ShowBanner(
+                        isPitfall
+                            ? "OPERATION PITFALL // ENGAGE SLATTERN"
+                            : "SAVE STRIKER EUREKA // ENGAGE LEATHERBACK",
+                        3.5f);
                 }
             }
 
             if (tabBar != null)
             {
                 OnTabSelected(tabBar.activeIndex);
-            }
-
-            if (pauseSubtitleText == null && menuVisualsRoot != null)
-            {
-                var t = menuVisualsRoot.transform.Find("Pause_DialogBox/Pause_Subtitle");
-                if (t != null) pauseSubtitleText = t.GetComponent<UnityEngine.UI.Text>();
             }
 
             UpdateBestTimeDisplay();
@@ -174,6 +176,8 @@ namespace PacificRimUI
                 controlsButton.onClick = OnControlsClicked;
             if (specsButton != null)
                 specsButton.onClick = OnSpecsClicked;
+            if (audioButton != null)
+                audioButton.onClick = OnAudioClicked;
             if (restartButton != null)
                 restartButton.onClick = OnRestartClicked;
             if (exitButton != null)
@@ -201,7 +205,6 @@ namespace PacificRimUI
         {
             if (isDefeated || isVictorious)
             {
-                // In defeat or victory screen, Esc is disabled so player must restart or return to main menu
                 if (!IsAnyModalOpen() && WasConfirmPressedThisFrame())
                 {
                     OnRestartClicked();
@@ -211,6 +214,12 @@ namespace PacificRimUI
 
             if (WasEscapePressedThisFrame())
             {
+                if (PacificRimAdminUI.IsOpen)
+                {
+                    PacificRimAdminUI.Close();
+                    PacificRimUISound.PlayBack();
+                    return;
+                }
                 if (controlsModal != null && controlsModal.IsOpen)
                 {
                     controlsModal.Close();
@@ -221,10 +230,18 @@ namespace PacificRimUI
                     specsModal.Close();
                     return;
                 }
+                if (audioModal != null && audioModal.IsOpen)
+                {
+                    audioModal.Close();
+                    return;
+                }
 
-                // In dedicated Main Menu scene, Esc closes modals but does NOT close the menu
                 if (isMainMenuScene)
                 {
+                    if (tabBar != null && tabBar.activeIndex != 0)
+                    {
+                        tabBar.SelectTab(0, silent: false);
+                    }
                     return;
                 }
 
@@ -253,7 +270,6 @@ namespace PacificRimUI
             }
             catch
             {
-                // Ignore if Legacy Input Manager is disabled
             }
             return false;
         }
@@ -275,7 +291,6 @@ namespace PacificRimUI
             }
             catch
             {
-                // Ignore if Legacy Input Manager is disabled
             }
             return false;
         }
@@ -283,7 +298,8 @@ namespace PacificRimUI
         private bool IsAnyModalOpen()
         {
             return (controlsModal != null && controlsModal.IsOpen) ||
-                   (specsModal != null && specsModal.IsOpen);
+                   (specsModal != null && specsModal.IsOpen) ||
+                   (audioModal != null && audioModal.IsOpen);
         }
 
         public void ToggleMenu()
@@ -292,11 +308,23 @@ namespace PacificRimUI
             SetMenuState(!isMenuOpen);
         }
 
+        private bool IsOperationPitfallActive()
+        {
+            if (isMainMenuScene)
+                return selectedMissionIndex == 1;
+            string sceneName = SceneManager.GetActiveScene().name;
+            if (!string.IsNullOrEmpty(sceneName) && sceneName.IndexOf("Operation Pitfall", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            var kaiju = PacificRimWater.KaijuAI.Instance;
+            return kaiju != null && kaiju.isSlattern;
+        }
+
         public void SetDefeatState()
         {
             if (isDefeated || isVictorious) return;
             isDefeated = true;
             SetMenuState(true);
+            bool isPitfall = IsOperationPitfallActive();
 
             if (deployButton != null)
             {
@@ -305,26 +333,27 @@ namespace PacificRimUI
             if (restartButton != null)
             {
                 restartButton.gameObject.SetActive(true);
-                restartButton.SetText("RESTART MISSION");
+                restartButton.SetText("RESTART");
             }
             if (pauseTitleText != null)
             {
-                pauseTitleText.text = "MISSION FAILED // CRITICAL BREACH";
+                pauseTitleText.text = "DEFEAT";
                 pauseTitleText.color = PacificRimUITheme.Danger;
             }
             if (pauseSubtitleText != null)
             {
-                pauseSubtitleText.text = "PACIFIC DEFENSE COMMAND // DRIFT LINK COLLAPSED";
-                pauseSubtitleText.color = PacificRimUITheme.Danger;
+                pauseSubtitleText.text = isPitfall ? "OP 02  ·  OPERATION PITFALL" : "OP 01  ·  SAVE STRIKER EUREKA";
+                pauseSubtitleText.color = PacificRimUITheme.TextDim;
             }
             if (pauseHealthText != null)
             {
-                pauseHealthText.text = "CRITICAL FAILURE // JAEGER DESTROYED";
+                pauseHealthText.text = "HULL DESTROYED  //  DRIFT LOST";
                 pauseHealthText.color = PacificRimUITheme.Danger;
             }
             if (pauseMissionText != null)
             {
-                pauseMissionText.text = "GIPSY DANGER COMPROMISED // STRIKER EUREKA LOST TO LEATHERBACK";
+                pauseMissionText.text = isPitfall ? "LOST TO SLATTERN" : "STRIKER EUREKA LOST";
+                pauseMissionText.color = PacificRimUITheme.TextDim;
             }
         }
 
@@ -333,6 +362,7 @@ namespace PacificRimUI
             if (isVictorious || isDefeated) return;
             isVictorious = true;
             SetMenuState(true);
+            bool isPitfall = IsOperationPitfallActive();
 
             if (deployButton != null)
             {
@@ -341,24 +371,26 @@ namespace PacificRimUI
             if (restartButton != null)
             {
                 restartButton.gameObject.SetActive(true);
-                restartButton.SetText("REPLAY MISSION");
+                restartButton.SetText("REPLAY");
             }
             if (pauseTitleText != null)
             {
-                pauseTitleText.text = "MISSION ACCOMPLISHED // VICTORY";
+                pauseTitleText.text = "VICTORY";
                 pauseTitleText.color = PacificRimUITheme.BlueBright;
             }
             if (pauseSubtitleText != null)
             {
-                pauseSubtitleText.text = "PACIFIC DEFENSE COMMAND // LEATHERBACK ELIMINATED // STRIKER EUREKA SAVED";
+                pauseSubtitleText.text = isPitfall
+                    ? "SLATTERN NEUTRALIZED  ·  BREACH SECURED"
+                    : "LEATHERBACK NEUTRALIZED  ·  STRIKER SAVED";
                 pauseSubtitleText.color = PacificRimUITheme.Success;
             }
             if (pauseHealthText != null)
             {
-                var jaeger = UnityEngine.Object.FindAnyObjectByType<PacificRimWater.SimpleJaegerController>();
+                var jaeger = Object.FindAnyObjectByType<PacificRimWater.SimpleJaegerController>();
                 int hp = jaeger != null ? Mathf.Max(0, Mathf.CeilToInt(jaeger.currentHealth)) : 1000;
                 int maxHp = jaeger != null ? Mathf.CeilToInt(jaeger.maxHealth) : 1000;
-                pauseHealthText.text = $"CATEGORY IV KAIJU ELIMINATED // JAEGER STANDING ({hp} / {maxHp} HP)";
+                pauseHealthText.text = $"HULL {hp} / {maxHp}  ·  JAEGER INTACT";
                 pauseHealthText.color = PacificRimUITheme.Success;
             }
             if (pauseMissionText != null)
@@ -367,7 +399,7 @@ namespace PacificRimUI
                 float bestTime = PacificRimCombatRecords.GetBestTime();
                 string finishStr = PacificRimCombatRecords.FormatTime(finishTime);
                 string bestStr = PacificRimCombatRecords.FormatTime(bestTime);
-                pauseMissionText.text = $"MISSION CLEAR: {finishStr}  //  BEST TIME: {bestStr}";
+                pauseMissionText.text = $"TIME {finishStr}  ·  BEST {bestStr}";
                 pauseMissionText.color = PacificRimUITheme.Amber;
             }
 
@@ -381,7 +413,6 @@ namespace PacificRimUI
         {
             isMenuOpen = open;
 
-            // Ensure this GameObject stays active so Update() always processes Esc.
             if (Application.isPlaying && !gameObject.activeSelf)
                 gameObject.SetActive(true);
 
@@ -401,6 +432,7 @@ namespace PacificRimUI
             {
                 if (controlsModal != null && controlsModal.IsOpen) controlsModal.Close();
                 if (specsModal != null && specsModal.IsOpen) specsModal.Close();
+                if (audioModal != null && audioModal.IsOpen) audioModal.Close();
             }
 
             if (hudRoot != null)
@@ -412,18 +444,17 @@ namespace PacificRimUI
             {
                 if (!isDefeated && !isVictorious)
                 {
+                    bool isPitfall = IsOperationPitfallActive();
                     if (pauseTitleText != null)
                     {
-                        pauseTitleText.text = isMainMenuScene
-                            ? "PACIFIC RIM: OPERATION PITFALL"
-                            : "PACIFIC RIM: OPERATION PITFALL // TACTICAL PAUSE";
-                        pauseTitleText.color = isMainMenuScene ? PacificRimUITheme.BlueBright : PacificRimUITheme.Text;
+                        pauseTitleText.text = isMainMenuScene ? "PACIFIC RIM" : "PAUSED";
+                        pauseTitleText.color = isMainMenuScene ? PacificRimUITheme.Text : PacificRimUITheme.BlueBright;
                     }
                     if (pauseSubtitleText != null)
                     {
                         pauseSubtitleText.text = isMainMenuScene
-                            ? "PPDC TACTICAL COMMAND // MISSION: DEFEND STRIKER EUREKA"
-                            : "MISSION DIRECTIVE // DEFEND STRIKER EUREKA";
+                            ? (selectedMissionIndex == 1 ? "02 · OPERATION PITFALL" : "01 · SAVE STRIKER EUREKA")
+                            : (isPitfall ? "OP 02  ·  OPERATION PITFALL" : "OP 01  ·  SAVE STRIKER EUREKA");
                         pauseSubtitleText.color = PacificRimUITheme.TextDim;
                     }
                 }
@@ -461,6 +492,35 @@ namespace PacificRimUI
 
         private void OnCardClicked(int index)
         {
+            if (isMainMenuScene)
+            {
+                if (index == 0 || index == 1)
+                {
+                    bool alreadySelected = selectedMissionIndex == index;
+                    SelectMission(index, playSound: true);
+                    if (alreadySelected)
+                    {
+                        OnDeployClicked();
+                    }
+                    else if (tabBar != null && tabBar.activeIndex != 0)
+                    {
+                        tabBar.SelectTab(0, silent: false);
+                    }
+                    return;
+                }
+
+                if (index == 2)
+                {
+                    OnControlsClicked();
+                    return;
+                }
+                if (index == 3)
+                {
+                    OnSpecsClicked();
+                    return;
+                }
+            }
+
             if (featureCards != null)
             {
                 for (int i = 0; i < featureCards.Length; i++)
@@ -470,16 +530,91 @@ namespace PacificRimUI
                 }
             }
 
-            // Card 0: Intercept / Deploy
-            if (index == 0 && isMainMenuScene)
-            {
-                OnDeployClicked();
-            }
-            // Card 1 opens Combat Controls modal, Card 2 opens Jaeger Specs modal
-            else if (index == 1)
+            if (index == 1)
                 OnControlsClicked();
             else if (index == 2)
                 OnSpecsClicked();
+        }
+
+        public void SelectMission(int missionIndex, bool playSound = true)
+        {
+            selectedMissionIndex = Mathf.Clamp(missionIndex, 0, 1);
+            gameplaySceneName = selectedMissionIndex == 1 ? Level2SceneName : Level1SceneName;
+
+            if (playSound)
+            {
+                PacificRimUISound.Play(PacificRimUISound.SoundType.Tab);
+            }
+
+            if (featureCards != null)
+            {
+                for (int i = 0; i < featureCards.Length; i++)
+                {
+                    if (featureCards[i] == null) continue;
+                    bool isSelectedMission = (i == selectedMissionIndex);
+                    featureCards[i].SetSelected(isSelectedMission);
+                    if (i == 0 || i == 1)
+                    {
+                        featureCards[i].SetBadge(
+                            isSelectedMission ? "ACTIVE" : "SELECT",
+                            isSelectedMission ? PacificRimUITheme.Success : PacificRimUITheme.TextDim);
+                    }
+                }
+            }
+
+            if (deployButton != null)
+            {
+                deployButton.SetText(selectedMissionIndex == 1 ? "DEPLOY  ·  OP 02" : "DEPLOY  ·  OP 01");
+            }
+
+            ResolveMainMenuTextReferences();
+
+            if (menuMainSubtitleText != null)
+            {
+                menuMainSubtitleText.text = selectedMissionIndex == 1
+                    ? "02  ·  OPERATION PITFALL"
+                    : "01  ·  SAVE STRIKER EUREKA";
+                menuMainSubtitleText.color = selectedMissionIndex == 1 ? PacificRimUITheme.BlueBright : PacificRimUITheme.Amber;
+            }
+
+            if (briefingText != null)
+            {
+                briefingText.text = selectedMissionIndex == 1
+                    ? "Descend to the Mariana Trench Breach and eliminate Category V Slattern."
+                    : "Protect paralyzed Striker Eureka from Category IV Leatherback in Hong Kong Bay.";
+            }
+
+            if (opRowTitleValue != null)
+            {
+                opRowTitleValue.text = selectedMissionIndex == 1
+                    ? "MARIANA TRENCH"
+                    : "HONG KONG BAY";
+            }
+
+            if (opRowThreatValue != null)
+            {
+                opRowThreatValue.text = selectedMissionIndex == 1
+                    ? "CAT V SLATTERN"
+                    : "CAT IV LEATHERBACK";
+            }
+
+            UpdateBestTimeDisplay();
+        }
+
+        private void ResolveMainMenuTextReferences()
+        {
+            if (menuVisualsRoot == null) return;
+
+            if (menuMainSubtitleText == null)
+                menuMainSubtitleText = menuVisualsRoot.transform.Find("SafeContentArea/Left_HeroColumn/SubTitle")?.GetComponent<UnityEngine.UI.Text>();
+            if (briefingText == null)
+                briefingText = menuVisualsRoot.transform.Find("SafeContentArea/Left_HeroColumn/TabPages_Container/Page_Operation/BriefingText")?.GetComponent<UnityEngine.UI.Text>();
+            if (opRowTitleValue == null)
+                opRowTitleValue = menuVisualsRoot.transform.Find("SafeContentArea/Left_HeroColumn/TabPages_Container/Page_Operation/OpRow_Weather/RightValue")?.GetComponent<UnityEngine.UI.Text>();
+            if (opRowThreatValue == null)
+                opRowThreatValue = menuVisualsRoot.transform.Find("SafeContentArea/Left_HeroColumn/TabPages_Container/Page_Operation/OpRow_Chassis/RightValue")?.GetComponent<UnityEngine.UI.Text>();
+            if (opRowBestValue == null)
+                opRowBestValue = menuVisualsRoot.transform.Find("SafeContentArea/Left_HeroColumn/TabPages_Container/Page_Operation/OpRow_BestRecord/RightValue")?.GetComponent<UnityEngine.UI.Text>();
         }
 
         private void OnDeployClicked()
@@ -488,30 +623,62 @@ namespace PacificRimUI
             {
                 PacificRimUISound.PlaySuccess();
                 Time.timeScale = 1f;
-                PacificRimLoadingScreen.LoadScene(gameplaySceneName);
+                string targetScene = selectedMissionIndex == 1 ? Level2CutsceneSceneName : gameplaySceneName;
+                PacificRimLoadingScreen.LoadScene(targetScene);
             }
             else
             {
                 SetMenuState(false);
                 if (jaegerHud != null)
                 {
-                    jaegerHud.ShowBanner("MISSION RESUMED // ENGAGE", 2.0f);
+                    jaegerHud.ShowBanner("RESUMED", 1.8f);
                 }
             }
         }
 
         private void OnControlsClicked()
         {
+            if (isMainMenuScene && tabBar != null && tabPanels != null && tabPanels.Length >= 2)
+            {
+                tabBar.SelectTab(1, silent: false);
+                return;
+            }
+
             if (specsModal != null && specsModal.IsOpen) specsModal.Close();
+            if (audioModal != null && audioModal.IsOpen) audioModal.Close();
             if (controlsModal != null)
                 controlsModal.Open();
         }
 
         private void OnSpecsClicked()
         {
+            if (isMainMenuScene && tabBar != null && tabPanels != null && tabPanels.Length >= 3)
+            {
+                tabBar.SelectTab(2, silent: false);
+                return;
+            }
+
             if (controlsModal != null && controlsModal.IsOpen) controlsModal.Close();
+            if (audioModal != null && audioModal.IsOpen) audioModal.Close();
             if (specsModal != null)
                 specsModal.Open();
+        }
+
+        private void OnAudioClicked()
+        {
+            if (isMainMenuScene && tabBar != null && tabPanels != null && tabPanels.Length >= 4)
+            {
+                tabBar.SelectTab(3, silent: false);
+                return;
+            }
+
+            if (controlsModal != null && controlsModal.IsOpen) controlsModal.Close();
+            if (specsModal != null && specsModal.IsOpen) specsModal.Close();
+            if (audioModal != null)
+            {
+                audioModal.Open();
+                audioModal.GetComponentInChildren<PacificRimAudioSettingsUI>(true)?.RefreshSliderValues();
+            }
         }
 
         public void OnRestartClicked()
@@ -532,47 +699,55 @@ namespace PacificRimUI
         {
             if (isMainMenuScene || isDefeated || isVictorious) return;
 
-            var jaeger = UnityEngine.Object.FindAnyObjectByType<PacificRimWater.SimpleJaegerController>();
+            var jaeger = Object.FindAnyObjectByType<PacificRimWater.SimpleJaegerController>();
             if (jaeger != null && pauseHealthText != null)
             {
                 int hp = Mathf.Max(0, Mathf.CeilToInt(jaeger.currentHealth));
                 int maxHp = Mathf.CeilToInt(jaeger.maxHealth);
                 float pct = maxHp > 0 ? (float)hp / maxHp : 1f;
-                string status = pct > 0.6f ? "SYSTEM OPTIMAL" : (pct > 0.25f ? "ARMOR COMPROMISED" : "CRITICAL HULL INTEGRITY");
-                pauseHealthText.text = $"HULL INTEGRITY: {hp} / {maxHp} HP // {status}";
+                string status = pct > 0.6f ? "OPTIMAL" : (pct > 0.25f ? "DAMAGED" : "CRITICAL");
+                pauseHealthText.text = $"HULL {hp} / {maxHp}  ·  {status}";
                 pauseHealthText.color = pct > 0.6f ? PacificRimUITheme.Success : (pct > 0.25f ? PacificRimUITheme.BlueBright : PacificRimUITheme.Danger);
             }
 
-            if (jaeger != null && pauseMissionText != null)
+            if (pauseMissionText != null)
             {
-                pauseMissionText.text = jaeger.inCombatStance
-                    ? "MISSION: SAVE STRIKER EUREKA // MELEE COMBAT ENGAGED"
-                    : "MISSION: SAVE STRIKER EUREKA // INTERCEPT LEATHERBACK";
+                float curTime = JaegerHUD.Instance != null ? JaegerHUD.Instance.CurrentCombatTime : 0f;
+                float bestTime = PacificRimCombatRecords.GetBestTime();
+                pauseMissionText.text = $"TIME {PacificRimCombatRecords.FormatTime(curTime)}  ·  BEST {PacificRimCombatRecords.FormatTime(bestTime)}";
+                pauseMissionText.color = PacificRimUITheme.TextDim;
             }
         }
 
         public void UpdateBestTimeDisplay()
         {
-            float bestSeconds = PacificRimCombatRecords.GetBestTime();
+            string targetLevel = isMainMenuScene ? gameplaySceneName : SceneManager.GetActiveScene().name;
+            float bestSeconds = PacificRimCombatRecords.GetBestTime(targetLevel);
             string bestStr = PacificRimCombatRecords.FormatTime(bestSeconds);
 
             if (menuBestTimeText != null)
             {
-                menuBestTimeText.text = $"BEST SPEEDRUN: {bestStr}";
+                string sectorLabel = selectedMissionIndex == 1 ? "SECTOR 09" : "SECTOR 04";
+                menuBestTimeText.text = $"{sectorLabel}  ·  BEST {bestStr}";
                 menuBestTimeText.color = PacificRimUITheme.Amber;
+            }
+
+            if (opRowBestValue != null)
+            {
+                opRowBestValue.text = bestStr;
+                opRowBestValue.color = PacificRimUITheme.Amber;
             }
 
             if (menuVisualsRoot != null)
             {
-                // Sector status in top tab bar
                 var sectorTxt = menuVisualsRoot.transform.Find("Top_TabBar/SectorStatus")?.GetComponent<UnityEngine.UI.Text>();
                 if (sectorTxt != null)
                 {
-                    sectorTxt.text = $"SHATTERDOME // SECTOR 07  [BEST TIME: {bestStr}]";
+                    string sectorLabel = selectedMissionIndex == 1 ? "SECTOR 09" : "SECTOR 04";
+                    sectorTxt.text = $"{sectorLabel}  ·  BEST {bestStr}";
                 }
 
-                // OpRow in Operation tab
-                var opRowBest = menuVisualsRoot.transform.Find("SafeContentArea/Left_HeroColumn/TabPages_Container/Page_Operation/OpRow_BestRecord/Value")?.GetComponent<UnityEngine.UI.Text>();
+                var opRowBest = menuVisualsRoot.transform.Find("SafeContentArea/Left_HeroColumn/TabPages_Container/Page_Operation/OpRow_BestRecord/RightValue")?.GetComponent<UnityEngine.UI.Text>();
                 if (opRowBest != null)
                 {
                     opRowBest.text = bestStr;
@@ -585,7 +760,6 @@ namespace PacificRimUI
         {
             if (!isMainMenuScene)
             {
-                // In pause menu, clicking exit returns to main menu scene!
                 OnReturnToMenuClicked();
                 return;
             }

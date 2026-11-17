@@ -66,8 +66,9 @@ namespace PacificRimWater
             new ClipEntry("StaggerLeft",   "10 // Stagger React (Left)",      1.97f, false),
             new ClipEntry("StaggerRight",  "11 // Stagger React (Right)",     1.97f, false),
             new ClipEntry("StaggerUp",     "12 // Heavy Recoil Upward",       2.30f, false),
-            new ClipEntry("Death",         "13 // Fatal Collapse",            4.30f, false),
-            new ClipEntry("DeathLoop",     "14 // Submerged Carcass",         3.30f, true),
+            new ClipEntry("StaggerDown",   "13 // Heavy Stagger Downward",    2.30f, false),
+            new ClipEntry("Death",         "14 // Fatal Collapse",            4.30f, false),
+            new ClipEntry("DeathLoop",     "15 // Submerged Carcass",         3.30f, true),
         };
 
         private int currentIndex = 0;
