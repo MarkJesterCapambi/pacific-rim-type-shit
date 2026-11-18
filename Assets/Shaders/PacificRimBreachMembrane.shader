@@ -9,6 +9,7 @@ Shader "PacificRim/BreachMembrane"
         _RippleProgress("Genetic Ripple Progress", Range(0.0, 2.0)) = 0.0
         _HitUV("Contact UV", Vector) = (0.5, 0.5, 0.0, 0.0)
         _TearAmount("Tear Opening Amount", Range(0.0, 1.0)) = 0.0
+        _CloseAmount("Collapse Close Amount", Range(0.0, 1.0)) = 0.0
         _FlareIntensity("HDR Flare Multiplier", Range(0.1, 15.0)) = 1.6
         _PulseSpeed("Organic Pulse Speed", Float) = 2.2
     }
@@ -62,6 +63,7 @@ Shader "PacificRim/BreachMembrane"
                 float _RippleProgress;
                 float4 _HitUV;
                 float _TearAmount;
+                float _CloseAmount;
                 float _FlareIntensity;
                 float _PulseSpeed;
             CBUFFER_END
@@ -125,10 +127,12 @@ Shader "PacificRim/BreachMembrane"
                 float dist = length(hitDelta);
                 float ang = atan2(hitDelta.y, hitDelta.x);
 
-                // Outer silhouette ellipse so the membrane fades smoothly into the jagged chasm walls
+                // Outer silhouette ellipse contracts radially inward when _CloseAmount -> 1
                 float2 edgeDelta = (uv - 0.5) * 2.0;
                 float radialEdge = length(edgeDelta);
-                float edgeMask = 1.0 - smoothstep(0.62, 0.98, radialEdge);
+                float openRadius = max(0.0, 0.98 * (1.0 - _CloseAmount));
+                float edgeMask = 1.0 - smoothstep(max(0.0, openRadius * 0.63 - 0.02), max(0.005, openRadius), radialEdge);
+                float closeRim = exp(-pow((radialEdge - openRadius * 0.82) / 0.085, 2.0)) * saturate(_CloseAmount * 4.0) * (1.0 - smoothstep(0.88, 1.0, _CloseAmount));
 
                 // Organic bio-electric plasma veins & cellular web
                 float n1 = Fbm(uv * 6.5 + float2(t * 0.14, -t * 0.11));
@@ -165,8 +169,10 @@ Shader "PacificRim/BreachMembrane"
                 // Bright blinding rift glow deep inside the ripped opening before fading into open tear
                 float innerBlaze = (1.0 - openAlpha) * saturate(_TearAmount * 2.0) * (1.0 - smoothstep(0.0, max(0.05, tearRadius * 0.65), dist));
                 hdrCol += half3(1.6, 1.8, 2.6) * (half)(innerBlaze * 1.4 * _FlareIntensity);
+                hdrCol += _TearEdgeColor.rgb * (half)(closeRim * 3.4 * _FlareIntensity);
 
-                float alpha = saturate((0.42 + veins * 0.48 + ringMask * 0.65 + tearRim * 0.85) * edgeMask * lerp(1.0, openAlpha + tearRim * 0.9, saturate(_TearAmount * 1.6)));
+                float baseFill = saturate(0.76 + veins * 0.26 + ringMask * 0.65 + tearRim * 0.85);
+                float alpha = saturate((baseFill * edgeMask + closeRim * 0.9) * lerp(1.0, openAlpha + tearRim * 0.9, saturate(_TearAmount * 1.6)) * (1.0 - smoothstep(0.92, 1.0, _CloseAmount)));
                 hdrCol = MixFog(hdrCol, input.fogCoord);
 
                 return half4(hdrCol, alpha);

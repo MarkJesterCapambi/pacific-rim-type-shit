@@ -142,6 +142,7 @@ namespace PacificRimCutscene
         private bool applyTPose = false;
         private float tPoseWeight = 0f;
         private float divePoseWeight = 0f;
+        private float zeroGFloatWeight = 0f;
         private float headTiltUpDeg = 15f;
         private bool lockCameraInLateUpdate = false;
         private Vector3 camTargetPos;
@@ -398,12 +399,28 @@ namespace PacificRimCutscene
             wormholeArcFlashLight.shadows = LightShadows.None;
 
             // Anamorphic Lens Flare quad anchored at Gipsy's chest turbine
-            Shader flareShader = Shader.Find("PacificRim/AnamorphicFlare") ?? Shader.Find("Universal Render Pipeline/Particles/Unlit");
-            chestAnamorphicFlareMat = new Material(flareShader) { name = "CoreMeltdown_AnamorphicFlare" };
-            chestAnamorphicFlareMat.SetColor(IdFlareColor, new Color(1.0f, 0.52f, 0.12f, 1f));
-            chestAnamorphicFlareMat.SetFloat(IdIntensity, 0f);
-            chestAnamorphicFlareMat.SetFloat(IdHorizontalStretch, 12f);
-            chestAnamorphicFlareMat.SetFloat("_CoreSharpness", 5.5f);
+            Shader flareShader = Shader.Find("PacificRim/AnamorphicFlare");
+            if (flareShader != null)
+            {
+                chestAnamorphicFlareMat = new Material(flareShader) { name = "CoreMeltdown_AnamorphicFlare" };
+                chestAnamorphicFlareMat.SetColor(IdFlareColor, new Color(1.0f, 0.52f, 0.12f, 1f));
+                chestAnamorphicFlareMat.SetFloat(IdIntensity, 0f);
+                chestAnamorphicFlareMat.SetFloat(IdHorizontalStretch, 12f);
+                chestAnamorphicFlareMat.SetFloat("_CoreSharpness", 5.5f);
+            }
+            else
+            {
+                Shader fallbackFlare = Shader.Find("Universal Render Pipeline/Particles/Unlit") ?? Shader.Find("Sprites/Default");
+                chestAnamorphicFlareMat = new Material(fallbackFlare) { name = "CoreMeltdown_AnamorphicFlare_Fallback" };
+                Texture2D softGlow = CreateSoftGlowParticleTexture();
+                if (chestAnamorphicFlareMat.HasProperty("_BaseMap")) chestAnamorphicFlareMat.SetTexture("_BaseMap", softGlow);
+                chestAnamorphicFlareMat.mainTexture = softGlow;
+                if (chestAnamorphicFlareMat.HasProperty("_Surface")) chestAnamorphicFlareMat.SetFloat("_Surface", 1f);
+                if (chestAnamorphicFlareMat.HasProperty("_Blend")) chestAnamorphicFlareMat.SetFloat("_Blend", 2f);
+                if (chestAnamorphicFlareMat.HasProperty("_ZWrite")) chestAnamorphicFlareMat.SetFloat("_ZWrite", 0f);
+                if (chestAnamorphicFlareMat.HasProperty(IdBaseColor)) chestAnamorphicFlareMat.SetColor(IdBaseColor, Color.clear);
+                chestAnamorphicFlareMat.renderQueue = 3500;
+            }
 
             chestAnamorphicFlareQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
             chestAnamorphicFlareQuad.name = "Chest_AnamorphicLensFlare";
@@ -514,39 +531,19 @@ namespace PacificRimCutscene
             Texture2D softParticleTex = CreateSoftGlowParticleTexture();
 
             // 1. Wormhole sparks shedding off Gipsy
-            Material addMat = new Material(unlitParticle) { name = "AnteverseAdditiveSparkMat" };
-            if (addMat.HasProperty("_BaseMap")) addMat.SetTexture("_BaseMap", softParticleTex);
-            addMat.mainTexture = softParticleTex;
-            if (addMat.HasProperty(IdBaseColor)) addMat.SetColor(IdBaseColor, new Color(2.4f, 2.0f, 1.4f, 1f));
-            if (addMat.HasProperty("_Surface")) addMat.SetFloat("_Surface", 1f);
-            if (addMat.HasProperty("_Blend")) addMat.SetFloat("_Blend", 2f);
+            Material addMat = CreateAdditiveParticleMaterial("AnteverseAdditiveSparkMat", unlitParticle, softParticleTex, new Color(2.4f, 2.0f, 1.4f, 1f));
             wormholeSparksPs = CreateEmitterPS("Wormhole_ArmorSparks", addMat, 360, ParticleSystemRenderMode.Stretch, 0.10f, 2.6f, 0f);
 
             // 2. Wormhole distortion plasma streaks whipping past camera (sleek, translucent, non-occluding)
-            Material streakMat = new Material(unlitParticle) { name = "WormholeStreaksMat" };
-            if (streakMat.HasProperty("_BaseMap")) streakMat.SetTexture("_BaseMap", softParticleTex);
-            streakMat.mainTexture = softParticleTex;
-            if (streakMat.HasProperty(IdBaseColor)) streakMat.SetColor(IdBaseColor, new Color(1.1f, 0.38f, 1.85f, 0.36f));
-            if (streakMat.HasProperty("_Surface")) streakMat.SetFloat("_Surface", 1f);
-            if (streakMat.HasProperty("_Blend")) streakMat.SetFloat("_Blend", 2f);
+            Material streakMat = CreateAdditiveParticleMaterial("WormholeStreaksMat", unlitParticle, softParticleTex, new Color(1.1f, 0.38f, 1.85f, 0.36f));
             wormholeStreaksPs = CreateEmitterPS("Wormhole_LensRipplesAndStreaks", streakMat, 180, ParticleSystemRenderMode.Stretch, 0.14f, 4.5f, 0f);
 
             // 3. Superheated plasma vents erupting from Gipsy's chest turbine during meltdown (feathered tapered jets)
-            Material plasmaMat = new Material(unlitParticle) { name = "CorePlasmaVentMat" };
-            if (plasmaMat.HasProperty("_BaseMap")) plasmaMat.SetTexture("_BaseMap", softParticleTex);
-            plasmaMat.mainTexture = softParticleTex;
-            if (plasmaMat.HasProperty(IdBaseColor)) plasmaMat.SetColor(IdBaseColor, new Color(2.2f, 1.75f, 1.0f, 0.85f));
-            if (plasmaMat.HasProperty("_Surface")) plasmaMat.SetFloat("_Surface", 1f);
-            if (plasmaMat.HasProperty("_Blend")) plasmaMat.SetFloat("_Blend", 2f);
+            Material plasmaMat = CreateAdditiveParticleMaterial("CorePlasmaVentMat", unlitParticle, softParticleTex, new Color(2.2f, 1.75f, 1.0f, 0.85f));
             corePlasmaVentPs = CreateEmitterPS("CoreMeltdown_PlasmaVents", plasmaMat, 360, ParticleSystemRenderMode.Stretch, 0.045f, 2.4f, 0f);
 
             // 4. Weightless zero-G Anteverse bioluminescent spores
-            Material sporeMat = new Material(unlitParticle) { name = "ZeroGSporesMat" };
-            if (sporeMat.HasProperty("_BaseMap")) sporeMat.SetTexture("_BaseMap", softParticleTex);
-            sporeMat.mainTexture = softParticleTex;
-            if (sporeMat.HasProperty(IdBaseColor)) sporeMat.SetColor(IdBaseColor, new Color(0.35f, 1.85f, 1.75f, 0.85f));
-            if (sporeMat.HasProperty("_Surface")) sporeMat.SetFloat("_Surface", 1f);
-            if (sporeMat.HasProperty("_Blend")) sporeMat.SetFloat("_Blend", 2f);
+            Material sporeMat = CreateAdditiveParticleMaterial("ZeroGSporesMat", unlitParticle, softParticleTex, new Color(0.35f, 1.85f, 1.75f, 0.85f));
             zeroGSporesPs = CreateEmitterPS("Anteverse_ZeroGSpores", sporeMat, 320, ParticleSystemRenderMode.Billboard, 0f, 1f, 0f);
             var zMain = zeroGSporesPs.main;
             zMain.startLifetime = new ParticleSystem.MinMaxCurve(6f, 11f);
@@ -588,6 +585,23 @@ namespace PacificRimCutscene
             rend.shadowCastingMode = ShadowCastingMode.Off;
             ps.Play();
             return ps;
+        }
+
+        private static Material CreateAdditiveParticleMaterial(string matName, Shader shader, Texture2D tex, Color baseColor)
+        {
+            var mat = new Material(shader) { name = matName };
+            if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", tex);
+            mat.mainTexture = tex;
+            if (mat.HasProperty(IdBaseColor)) mat.SetColor(IdBaseColor, baseColor);
+            if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
+            if (mat.HasProperty("_Blend")) mat.SetFloat("_Blend", 2f);
+            if (mat.HasProperty("_SrcBlend")) mat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+            if (mat.HasProperty("_DstBlend")) mat.SetFloat("_DstBlend", (float)BlendMode.One);
+            if (mat.HasProperty("_ZWrite")) mat.SetFloat("_ZWrite", 0f);
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.EnableKeyword("_BLENDMODE_ADD");
+            mat.renderQueue = (int)RenderQueue.Transparent;
+            return mat;
         }
 
         private static Texture2D cachedSoftGlowTex;
@@ -660,6 +674,7 @@ namespace PacificRimCutscene
             applyLateUpdatePoses = true;
             lockCameraInLateUpdate = true;
             divePoseWeight = 1f;
+            zeroGFloatWeight = 0f;
             applyTPose = false;
             tPoseWeight = 0f;
 
@@ -738,8 +753,9 @@ namespace PacificRimCutscene
             ConfigureAnteverseCavernAtmosphere();
             StartZeroGravityVacuumAudio();
 
-            // Clear brief burst flash quickly over 0.35s
-            divePoseWeight = 0f;
+            // Clear brief burst flash quickly over 0.35s and ease smoothly from plunge pose into relaxed zero-G float
+            divePoseWeight = 1f;
+            zeroGFloatWeight = 0f;
             if (zeroGSporesPs != null) zeroGSporesPs.Play();
             if (exitMembraneMat != null)
             {
@@ -772,6 +788,8 @@ namespace PacificRimCutscene
                 b4Timer += dt;
                 float u = Mathf.Clamp01(b4Timer / zeroGRevealDuration);
                 float ease = 1f - Mathf.Pow(1f - u, 2.2f); // Rapid deceleration into eerie zero-G drift
+                divePoseWeight = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(b4Timer / 2.2f));
+                zeroGFloatWeight = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(b4Timer / 1.8f));
 
                 if (whiteoutOverlayGroup != null && b4Timer < 0.45f)
                 {
@@ -832,8 +850,10 @@ namespace PacificRimCutscene
                 b5Timer += dt;
                 float u = Mathf.Clamp01(b5Timer / tPoseMeltdownDuration);
 
-                // Smoothly spread both arms outward into the iconic cruciform T-pose
+                // Smoothly spread both arms outward into the iconic cruciform T-pose while easing out zero-G drift
                 tPoseWeight = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(b5Timer / 1.85f));
+                zeroGFloatWeight = (1f - tPoseWeight) * 0.65f;
+                divePoseWeight = 0f;
                 headTiltUpDeg = Mathf.Lerp(4f, 18f, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(b5Timer / 2.2f)));
 
                 // Gentle weightless zero-G float upright while Slattern drifts slowly further into the background
@@ -1343,9 +1363,17 @@ namespace PacificRimCutscene
 
                 if (chestAnamorphicFlareMat != null)
                 {
-                    chestAnamorphicFlareMat.SetColor(IdFlareColor, curCol);
-                    chestAnamorphicFlareMat.SetFloat(IdIntensity, Mathf.Lerp(0.35f, 5.2f, Mathf.Pow(meltdownT, 1.4f)) * instability);
-                    chestAnamorphicFlareMat.SetFloat(IdHorizontalStretch, Mathf.Lerp(10f, 24f, meltdownT));
+                    float flareIntensity = Mathf.Lerp(0.35f, 5.2f, Mathf.Pow(meltdownT, 1.4f)) * instability;
+                    if (chestAnamorphicFlareMat.HasProperty(IdFlareColor))
+                    {
+                        chestAnamorphicFlareMat.SetColor(IdFlareColor, curCol);
+                        chestAnamorphicFlareMat.SetFloat(IdIntensity, flareIntensity);
+                        chestAnamorphicFlareMat.SetFloat(IdHorizontalStretch, Mathf.Lerp(10f, 24f, meltdownT));
+                    }
+                    else if (chestAnamorphicFlareMat.HasProperty(IdBaseColor))
+                    {
+                        chestAnamorphicFlareMat.SetColor(IdBaseColor, curCol * Mathf.Clamp(flareIntensity, 0f, 3f));
+                    }
                 }
             }
 
@@ -1370,31 +1398,67 @@ namespace PacificRimCutscene
 
             if (applyLateUpdatePoses && jaegerTransform != null)
             {
-                // Wormhole dive arms pose
+                Vector3 up = jaegerTransform.up;
+                Vector3 rgt = jaegerTransform.right;
+                Vector3 fwd = jaegerTransform.forward;
+
+                // Wormhole heavy braced tumble pose (matches Beat 2 sacrificial plunge — bent staggered knees & braced arms)
                 if (divePoseWeight > 0.01f)
                 {
-                    Vector3 up = jaegerTransform.up;
-                    Vector3 rgt = jaegerTransform.right;
-                    Vector3 fwd = jaegerTransform.forward;
+                    float dw = Mathf.Clamp01(divePoseWeight);
+                    float turb = Mathf.Sin(Time.time * 4.5f) * 0.45f;
                     if (upperArmL != null && forearmL != null && handL != null)
                     {
-                        Vector3 tL = handL.parent.position + (up * 4.2f - rgt * 1.6f - fwd * 1.1f);
-                        SolveTwoBoneIKWorld(upperArmL, forearmL, handL, Vector3.Lerp(handL.position, tL, divePoseWeight), -fwd);
+                        Vector3 tL = upperArmL.position + (-up * 2.5f + fwd * 3.1f - rgt * 2.3f + up * turb);
+                        SolveTwoBoneIKWorld(upperArmL, forearmL, handL, Vector3.Lerp(handL.position, tL, dw), (-rgt * 0.85f - up * 0.35f - fwd * 0.25f).normalized, keepTipLocalRotation: true);
                     }
                     if (upperArmR != null && forearmR != null && handR != null)
                     {
-                        Vector3 tR = handR.parent.position + (up * 4.2f + rgt * 1.6f - fwd * 1.1f);
-                        SolveTwoBoneIKWorld(upperArmR, forearmR, handR, Vector3.Lerp(handR.position, tR, divePoseWeight), -fwd);
+                        Vector3 tR = upperArmR.position + (-up * 2.5f + fwd * 3.1f + rgt * 2.3f - up * turb);
+                        SolveTwoBoneIKWorld(upperArmR, forearmR, handR, Vector3.Lerp(handR.position, tR, dw), (rgt * 0.85f - up * 0.35f - fwd * 0.25f).normalized, keepTipLocalRotation: true);
+                    }
+                    if (thighL != null && shinL != null && footL != null)
+                    {
+                        Vector3 fL = thighL.position + (-up * 8.4f + fwd * 3.0f - rgt * 0.45f + fwd * turb * 0.8f);
+                        SolveTwoBoneIKWorld(thighL, shinL, footL, Vector3.Lerp(footL.position, fL, dw), (fwd * 0.9f - rgt * 0.25f).normalized, keepTipLocalRotation: true);
+                    }
+                    if (thighR != null && shinR != null && footR != null)
+                    {
+                        Vector3 fR = thighR.position + (-up * 9.8f - fwd * 1.4f + rgt * 0.45f - fwd * turb * 0.8f);
+                        SolveTwoBoneIKWorld(thighR, shinR, footR, Vector3.Lerp(footR.position, fR, dw), (fwd * 0.85f + rgt * 0.28f).normalized, keepTipLocalRotation: true);
+                    }
+                }
+
+                // Weightless zero-G relaxed drift pose before spreading into Beat 5 Cruciform T-pose
+                if (zeroGFloatWeight > 0.01f && tPoseWeight < 0.99f)
+                {
+                    float zw = Mathf.Clamp01(zeroGFloatWeight) * (1f - Mathf.Clamp01(tPoseWeight));
+                    float sway = Mathf.Sin(Time.time * 1.15f) * 0.35f;
+                    if (thighL != null && shinL != null && footL != null)
+                    {
+                        Vector3 fL = thighL.position + (-up * 10.2f + fwd * 1.85f - rgt * 0.55f);
+                        SolveTwoBoneIKWorld(thighL, shinL, footL, Vector3.Lerp(footL.position, fL, zw), (fwd * 0.9f - rgt * 0.25f).normalized, keepTipLocalRotation: true);
+                    }
+                    if (thighR != null && shinR != null && footR != null)
+                    {
+                        Vector3 fR = thighR.position + (-up * 10.7f + fwd * 0.45f + rgt * 0.55f);
+                        SolveTwoBoneIKWorld(thighR, shinR, footR, Vector3.Lerp(footR.position, fR, zw), (fwd * 0.85f + rgt * 0.25f).normalized, keepTipLocalRotation: true);
+                    }
+                    if (upperArmL != null && forearmL != null && handL != null)
+                    {
+                        Vector3 aL = upperArmL.position + (-up * 3.8f + fwd * 1.6f - rgt * 2.8f + up * sway);
+                        SolveTwoBoneIKWorld(upperArmL, forearmL, handL, Vector3.Lerp(handL.position, aL, zw), (-rgt * 0.85f - fwd * 0.3f).normalized, keepTipLocalRotation: true);
+                    }
+                    if (upperArmR != null && forearmR != null && handR != null)
+                    {
+                        Vector3 aR = upperArmR.position + (-up * 3.8f + fwd * 1.6f + rgt * 2.8f - up * sway);
+                        SolveTwoBoneIKWorld(upperArmR, forearmR, handR, Vector3.Lerp(handR.position, aR, zw), (rgt * 0.85f - fwd * 0.3f).normalized, keepTipLocalRotation: true);
                     }
                 }
 
                 // Cruciform floating T-pose with upward-tilted head (0:24–0:33)
                 if (applyTPose && tPoseWeight > 0.005f)
                 {
-                    Vector3 rgt = jaegerTransform.right;
-                    Vector3 up = jaegerTransform.up;
-                    Vector3 fwd = jaegerTransform.forward;
-
                     if (upperArmL != null && forearmL != null)
                     {
                         AlignBoneChainDirection(upperArmL, forearmL, (-rgt + up * 0.08f).normalized, tPoseWeight);
@@ -1437,12 +1501,13 @@ namespace PacificRimCutscene
             bone.rotation = Quaternion.Slerp(Quaternion.identity, delta, Mathf.Clamp01(weight)) * bone.rotation;
         }
 
-        private static void SolveTwoBoneIKWorld(Transform root, Transform mid, Transform tip, Vector3 targetPos, Vector3 poleForward)
+        private static void SolveTwoBoneIKWorld(Transform root, Transform mid, Transform tip, Vector3 targetPos, Vector3 poleForward, bool keepTipLocalRotation = false)
         {
             Vector3 a = root.position;
             Vector3 b = mid.position;
             Vector3 c = tip.position;
             Quaternion origTipRot = tip.rotation;
+            Quaternion origTipLocalRot = tip.localRotation;
 
             float l1 = Vector3.Distance(a, b);
             float l2 = Vector3.Distance(b, c);
@@ -1481,7 +1546,8 @@ namespace PacificRimCutscene
             {
                 mid.rotation = Quaternion.FromToRotation(curMidToTip, newMidToTip) * mid.rotation;
             }
-            tip.rotation = origTipRot;
+            if (keepTipLocalRotation) tip.localRotation = origTipLocalRot;
+            else tip.rotation = origTipRot;
         }
 
         private Vector3 GetTurbineWorldCenter()

@@ -63,15 +63,19 @@ namespace PacificRimCutscene
         private AudioLowPassFilter cameraLowPass;
         private Light mainDirectionalLight;
 
-        // Jaeger bones for procedural lean, arm IK, and sparks
+        // Jaeger bones for procedural lean, arm/leg IK, finger curl, and sparks
         private Transform hipsBone, spine1Bone, chestBone, headBone;
         private Transform upperArmL, forearmL, handL, upperArmR, forearmR, handR;
         private Transform thighL, shinL, footL, thighR, shinR, footR;
+        private Transform thumbR1, thumbR2, indexR1, indexR2, indexR3, middleR1, middleR2, middleR3, ringR1, ringR2, ringR3, pinkyR1, pinkyR2, pinkyR3;
+        private Transform thumbL1, thumbL2, indexL1, indexL2, indexL3, middleL1, middleL2, middleL3, ringL1, ringL2, ringL3, pinkyL1, pinkyL2, pinkyL3;
 
-        // Slattern bones for limp head/neck dragging
+        // Slattern bones & articulated world-space physics ragdoll
         private readonly List<Transform> slatternHeadNeckChain = new List<Transform>();
         private Transform slatternHeadBone;
         private Transform slatternTorsoDragBone;
+        private SlatternCutsceneRagdoll slatternRagdoll;
+        private TerrainCollider trenchTerrainCollider;
 
         // Runtime visual rigs
         private Material visorMatInstance;
@@ -93,7 +97,11 @@ namespace PacificRimCutscene
         private GameObject breachMembraneObj;
         private Light breachFlareLight;
         private readonly List<Material> runtimeBreachMaterials = new List<Material>();
+        private readonly List<Color> breachMatBaseColors = new List<Color>();
+        private readonly List<Color> breachMatEmColors = new List<Color>();
+        private readonly List<Transform> breachGodRayTransforms = new List<Transform>();
         private readonly List<Light> breachLights = new List<Light>();
+        private readonly List<float> breachLightBaseIntensities = new List<float>();
 
         // UI & overlays
         private RectTransform letterboxRoot;
@@ -120,7 +128,14 @@ namespace PacificRimCutscene
         private float camTargetFov = 50f;
 
         private float jaegerForwardLeanDeg = 0f;
+        private float jaegerTorsoTwistDeg = 0f;
+        private float jaegerCrouchWeight = 0f;
+        private float jaegerCrouchDropMeters = 2.4f;
+        private float jaegerHeadTiltDeg = 0f;
         private float jaegerDiveBlend = 0f;
+        private float jaegerPlungeTime = 0f;
+        private float braceLeftArmWeight = 0f;
+        private float gripRightFistWeight = 0f;
         private bool ikGripHead = false;
         private bool ikHeaveForward = false;
         private float heaveAnimWeight = 0f;
@@ -128,6 +143,10 @@ namespace PacificRimCutscene
         private bool headAttachedToGrip = false;
         private Vector3 gripWorldTarget;
         private Vector3 slatternDragDirection = Vector3.forward;
+        private bool useRagdollPhysics = false;
+        private bool isHeavingRagdoll = false;
+        private float heaveAssistT = 0f;
+        private Vector3 currentHeaveVelocityTarget;
 
         private static readonly int IdEmissionColor = Shader.PropertyToID("_EmissionColor");
         private static readonly int IdBaseColor = Shader.PropertyToID("_BaseColor");
@@ -140,6 +159,7 @@ namespace PacificRimCutscene
         private static readonly int IdRippleProgress = Shader.PropertyToID("_RippleProgress");
         private static readonly int IdHitUV = Shader.PropertyToID("_HitUV");
         private static readonly int IdTearAmount = Shader.PropertyToID("_TearAmount");
+        private static readonly int IdCloseAmount = Shader.PropertyToID("_CloseAmount");
         private static readonly int IdFlareIntensity = Shader.PropertyToID("_FlareIntensity");
 
         public static void StartFromSlatternDefeat()
@@ -166,6 +186,11 @@ namespace PacificRimCutscene
 
         private void OnDestroy()
         {
+            if (slatternRagdoll != null)
+            {
+                slatternRagdoll.Dispose();
+                slatternRagdoll = null;
+            }
             if (Instance == this) Instance = null;
         }
 
@@ -214,6 +239,7 @@ namespace PacificRimCutscene
             }
 
             if (trenchTerrain == null) trenchTerrain = FindAnyObjectByType<Terrain>();
+            if (trenchTerrain != null) trenchTerrainCollider = trenchTerrain.GetComponent<TerrainCollider>();
             if (underwaterEnv == null) underwaterEnv = UnderwaterEnvironmentController.Instance ?? FindAnyObjectByType<UnderwaterEnvironmentController>();
             if (atmosphereAudio == null) atmosphereAudio = FindAnyObjectByType<AtmosphereAudioController>();
             if (splashManager == null) splashManager = WaterSplashManager.Instance ?? FindAnyObjectByType<WaterSplashManager>();
@@ -260,6 +286,34 @@ namespace PacificRimCutscene
                     case "Thigh.R": thighR = t; break;
                     case "Shin.R": shinR = t; break;
                     case "Foot.R": footR = t; break;
+                    case "Thumb.R": thumbR1 = t; break;
+                    case "Thumb2.R": thumbR2 = t; break;
+                    case "Index.R": indexR1 = t; break;
+                    case "Index2.R": indexR2 = t; break;
+                    case "Index3.R": indexR3 = t; break;
+                    case "Middle.R": middleR1 = t; break;
+                    case "Middle2.R": middleR2 = t; break;
+                    case "Middle3.R": middleR3 = t; break;
+                    case "Ring.R": ringR1 = t; break;
+                    case "Ring2.R": ringR2 = t; break;
+                    case "Ring3.R": ringR3 = t; break;
+                    case "Pinky.R": pinkyR1 = t; break;
+                    case "Pinky2.R": pinkyR2 = t; break;
+                    case "Pinky3.R": pinkyR3 = t; break;
+                    case "Thumb.L": thumbL1 = t; break;
+                    case "Thumb2.L": thumbL2 = t; break;
+                    case "Index.L": indexL1 = t; break;
+                    case "Index2.L": indexL2 = t; break;
+                    case "Index3.L": indexL3 = t; break;
+                    case "Middle.L": middleL1 = t; break;
+                    case "Middle2.L": middleL2 = t; break;
+                    case "Middle3.L": middleL3 = t; break;
+                    case "Ring.L": ringL1 = t; break;
+                    case "Ring2.L": ringL2 = t; break;
+                    case "Ring3.L": ringL3 = t; break;
+                    case "Pinky.L": pinkyL1 = t; break;
+                    case "Pinky2.L": pinkyL2 = t; break;
+                    case "Pinky3.L": pinkyL3 = t; break;
                 }
             }
         }
@@ -320,7 +374,59 @@ namespace PacificRimCutscene
             // Lock player, AI, camera follow, audio loops, and begin preloading The Anteverse in the background!
             PrepareEndingStage();
             StartAnteverseBackgroundPreload();
-            yield return new WaitForSeconds(0.25f);
+
+            // Stage initial positions & build Slattern's world-scale ragdoll BEFORE fade-in so
+            // PhysX settles Slattern's 3,200-ton body & tails naturally onto the seabed behind Gipsy.
+            Vector3 breachCenter = ResolveBreachTargetPoint();
+            Vector3 dragStartJaeger = new Vector3(4.5f, SampleTerrainY(4.5f, 52.0f) + 2.977f, 52.0f);
+            Vector3 dragEndJaeger = new Vector3(4.5f, SampleTerrainY(4.5f, 83.5f) + 2.977f, 83.5f);
+            Quaternion faceBreachRot = Quaternion.LookRotation(new Vector3(breachCenter.x - dragStartJaeger.x, 0f, breachCenter.z - dragStartJaeger.z).normalized, Vector3.up);
+            Vector3 startFwd = faceBreachRot * Vector3.forward;
+            Vector3 startRight = faceBreachRot * Vector3.right;
+
+            SetJaegerPose(dragStartJaeger, faceBreachRot);
+            if (jaegerAnimator != null)
+            {
+                jaegerAnimator.speed = 0.78f;
+                jaegerAnimator.SetFloat("Speed", 0.55f);
+                jaegerAnimator.SetBool("IsRunning", false);
+                jaegerAnimator.SetBool("InCombat", false);
+                jaegerAnimator.SetBool("IsBlocking", false);
+                jaegerAnimator.SetFloat("WalkDirection", 1f);
+                jaegerAnimator.SetFloat("RunBlend", 0f);
+                if (jaegerAnimator.layerCount > 1) jaegerAnimator.SetLayerWeight(1, 0f);
+                jaegerAnimator.Play("Locomotion", 0, 0f);
+                jaegerAnimator.Update(0f);
+            }
+
+            Vector3 initialGripTarget = ComputeDragGripTarget(dragStartJaeger, startFwd, startRight);
+            gripWorldTarget = initialGripTarget;
+
+            if (slatternTransform != null)
+            {
+                Vector3 slatInitPos = dragStartJaeger - startFwd * 28.0f + startRight * 1.9f;
+                slatInitPos.y = SampleTerrainY(slatInitPos.x, slatInitPos.z) + 0.10f;
+                Quaternion slatInitRot = faceBreachRot * Quaternion.Euler(0f, 180f, 0f);
+                SetSlatternPose(slatInitPos, slatInitRot);
+
+                if (slatternAnimator != null)
+                {
+                    slatternAnimator.Play("DeathLoop", 0, 0.25f);
+                    slatternAnimator.Update(0f);
+                    slatternAnimator.speed = 0f;
+                    slatternAnimator.enabled = false;
+                }
+
+                UncurlSlatternTailsForDrag(slatInitRot);
+                AlignSlatternSkullToInitialGrip(initialGripTarget);
+                slatternRagdoll = new SlatternCutsceneRagdoll(slatternTransform, trenchTerrainCollider);
+                slatternRagdoll.AttachGripToSkull(initialGripTarget);
+                useRagdollPhysics = true;
+                isHeavingRagdoll = false;
+            }
+
+            // Let PhysX settle Slattern's limp limbs, torso & triple tails onto the seabed while screen is black
+            yield return new WaitForSeconds(0.28f);
 
             // Show letterbox bars and start eerie finale audio
             if (letterboxCanvasGroup != null) letterboxCanvasGroup.alpha = 1f;
@@ -330,44 +436,27 @@ namespace PacificRimCutscene
             // =========================================================================
             // BEAT 1 (0:00 – 0:06): Dragging Slattern Across the Abyss
             // =========================================================================
-            Vector3 breachCenter = ResolveBreachTargetPoint();
-            Vector3 dragStartJaeger = new Vector3(4.5f, SampleTerrainY(4.5f, 52.0f) + 2.977f, 52.0f);
-            Vector3 dragEndJaeger = new Vector3(4.5f, SampleTerrainY(4.5f, 83.5f) + 2.977f, 83.5f);
-            Quaternion faceBreachRot = Quaternion.LookRotation(new Vector3(breachCenter.x - dragStartJaeger.x, 0f, breachCenter.z - dragStartJaeger.z).normalized, Vector3.up);
-
-            SetJaegerPose(dragStartJaeger, faceBreachRot);
-            if (jaegerAnimator != null)
-            {
-                jaegerAnimator.speed = 0.72f;
-                jaegerAnimator.SetFloat("Speed", 0.85f);
-                jaegerAnimator.SetBool("IsRunning", false);
-                jaegerAnimator.SetBool("InCombat", false);
-                jaegerAnimator.SetBool("IsBlocking", false);
-                jaegerAnimator.SetFloat("WalkDirection", 1f);
-                jaegerAnimator.SetFloat("RunBlend", 0f);
-                if (jaegerAnimator.layerCount > 1) jaegerAnimator.SetLayerWeight(1, 0f);
-                jaegerAnimator.CrossFade("Locomotion", 0.05f, 0, 0f);
-            }
-
-            if (slatternAnimator != null)
-            {
-                slatternAnimator.Play("DeathLoop", 0, 0.25f);
-                slatternAnimator.speed = 0f;
-            }
-
             applyLateUpdatePoses = true;
             lockCameraInLateUpdate = true;
-            jaegerForwardLeanDeg = 22f;
+            jaegerForwardLeanDeg = 29f;
+            jaegerTorsoTwistDeg = 14f;
+            jaegerCrouchWeight = 0.78f;
+            jaegerCrouchDropMeters = 2.55f;
+            jaegerHeadTiltDeg = 7f;
             jaegerDiveBlend = 0f;
+            braceLeftArmWeight = 0.72f;
+            gripRightFistWeight = 1f;
             ikGripHead = true;
             ikHeaveForward = false;
-            headAttachedToGrip = true;
-            slatternDragDirection = faceBreachRot * Vector3.forward;
+            headAttachedToGrip = false; // Handled directly by SlatternCutsceneRagdoll
+            slatternDragDirection = startFwd;
 
             float dragTimer = 0f;
             float fadeInDur = 1.0f;
             float siltEmitAcc = 0f;
-            float footstepAcc = 0f;
+            int lastFootstepHalfCycle = -1;
+            const float walkClipLength = 3.30f;
+            const float dragWalkAnimSpeed = 0.78f;
 
             while (dragTimer < dragDuration)
             {
@@ -387,48 +476,57 @@ namespace PacificRimCutscene
                     fadeOverlayGroup.alpha = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(dragTimer / fadeInDur));
                 }
 
-                Vector3 jPos = Vector3.Lerp(dragStartJaeger, dragEndJaeger, u);
-                jPos.y = SampleTerrainY(jPos.x, jPos.z) + 2.977f;
+                // Stride-modulated progress so Gipsy surges during leg push and plants heavily on footfall
+                float cycleProgress = (dragTimer * dragWalkAnimSpeed) / walkClipLength;
+                float stepAngle = cycleProgress * Mathf.PI * 4f; // 2 steps per cycle
+                float uWeighted = Mathf.Clamp01(u - Mathf.Sin(stepAngle) * 0.016f);
+
+                Vector3 jPos = Vector3.Lerp(dragStartJaeger, dragEndJaeger, uWeighted);
+                // Heavy vertical sink on foot plant (~0.35m) & strain rise on push
+                float stepBob = -Mathf.Cos(stepAngle) * 0.24f;
+                jPos.y = SampleTerrainY(jPos.x, jPos.z) + 2.977f + stepBob;
                 SetJaegerPose(jPos, faceBreachRot);
 
-                // Orient Slattern so its massive skull sits right behind Gipsy's right hip/hand while torso & tails trail behind
+                jaegerForwardLeanDeg = 26.5f + Mathf.Sin(stepAngle) * 2.2f;
+                jaegerTorsoTwistDeg = 12f + Mathf.Sin(stepAngle * 0.5f) * 3.5f;
+
                 Vector3 fwd = faceBreachRot * Vector3.forward;
                 Vector3 right = faceBreachRot * Vector3.right;
-                Vector3 slatPos = jPos - fwd * 29.5f + right * 1.6f;
-                slatPos.y = SampleTerrainY(slatPos.x, slatPos.z) + 1.85f;
-                float dragWobble = Mathf.Sin(dragTimer * 2.3f) * 2.2f;
-                Quaternion slatDragRot = faceBreachRot * Quaternion.Euler(0f, 180f, dragWobble);
-                SetSlatternPose(slatPos, slatDragRot);
 
-                // Emit seabed silt & dust plumes kicked up by dragging Slattern's body/tails & Gipsy's footsteps
-                siltEmitAcc += dt;
-                if (siltEmitAcc >= 0.045f)
+                // Trigger seismic footstep thud + localized seabed silt burst on exact plant phase
+                int halfCycle = Mathf.FloorToInt(cycleProgress * 2f + 0.84f);
+                if (halfCycle != lastFootstepHalfCycle)
                 {
-                    siltEmitAcc = 0f;
-                    Vector3 torsoDragCenter = slatternTorsoDragBone != null ? slatternTorsoDragBone.position : (jPos - fwd * 16.5f);
-                    EmitDragSiltAndBubbles(jPos, torsoDragCenter);
+                    lastFootstepHalfCycle = halfCycle;
+                    Transform plantedFoot = (halfCycle % 2 == 0) ? footR : footL;
+                    Vector3 footImpactPos = plantedFoot != null ? new Vector3(plantedFoot.position.x, SampleTerrainY(plantedFoot.position.x, plantedFoot.position.z), plantedFoot.position.z) : jPos;
+                    PacificRimAudioManager.Instance?.PlayOceanFootstep(footImpactPos, 1.5f);
+                    PacificRimAudioManager.Instance?.PlayArmorCreak(jPos + Vector3.up * 15f, 0.78f);
+                    if (cameraShake != null) cameraShake.TriggerStompFeedback(0.62f);
+                    EmitFootstepSiltBurst(footImpactPos);
                 }
 
-                footstepAcc += dt;
-                if (footstepAcc >= 1.15f)
+                // Emit seabed silt & dust plumes kicked up by dragging Slattern's grounded carcass & tails
+                siltEmitAcc += dt;
+                if (siltEmitAcc >= 0.04f)
                 {
-                    footstepAcc = 0f;
-                    PacificRimAudioManager.Instance?.PlayOceanFootstep(jPos, 1.35f);
-                    PacificRimAudioManager.Instance?.PlayArmorCreak(jPos + Vector3.up * 15f, 0.7f);
-                    if (cameraShake != null) cameraShake.TriggerPlayerHitFeedback(isHeavy: false);
+                    siltEmitAcc = 0f;
+                    Vector3 torsoDragCenter = slatternRagdoll != null ? slatternRagdoll.TorsoWorldCenter : (jPos - fwd * 17f);
+                    Vector3 tailDragCenter = slatternRagdoll != null ? slatternRagdoll.TailWorldCenter : (jPos - fwd * 27f);
+                    EmitDragSiltAndBubbles(jPos, torsoDragCenter);
+                    EmitDragSiltAndBubbles(jPos, tailDragCenter);
                 }
 
                 UpdateSparkEmitters();
 
-                // Sweeping low-angle tracking shot: starts slightly ahead-3/4 wide enough to frame Gipsy head-to-toe
-                // (glowing orange chest turbine, twin headlights, scarred armor, sparking joints & Gipsy hauling Slattern by the head),
-                // then tracks smoothly back-alongside to reveal the glowing magenta-blue Breach ahead
+                // Sweeping low-angle tracking shot: frames Gipsy head-to-toe leaning into the heavy haul
+                // alongside Slattern's grounded carcass scraping through seabed silt, sweeping to reveal the Breach ahead
                 float sweepU = Mathf.SmoothStep(0f, 1f, u);
                 Vector3 camStartOffset = right * 28.0f + fwd * 10.5f + Vector3.up * 4.4f;
                 Vector3 camEndOffset = right * 26.0f - fwd * 11.0f + Vector3.up * 6.8f;
                 camTargetPos = jPos + Vector3.Lerp(camStartOffset, camEndOffset, sweepU);
 
-                Vector3 lookAtDrag = jPos + Vector3.up * 10.2f - fwd * 4.5f;
+                Vector3 lookAtDrag = jPos + Vector3.up * 9.5f - fwd * 5.0f;
                 Vector3 lookAtAhead = Vector3.Lerp(jPos + Vector3.up * 9.5f + fwd * 8.0f, breachCenter + Vector3.up * 4.0f, 0.38f);
                 Vector3 lookTarget = Vector3.Lerp(lookAtDrag, lookAtAhead, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((u - 0.16f) / 0.84f)));
                 camTargetRot = Quaternion.LookRotation((lookTarget - camTargetPos).normalized, Vector3.up);
@@ -440,38 +538,54 @@ namespace PacificRimCutscene
             if (fadeOverlayGroup != null) fadeOverlayGroup.alpha = 0f;
 
             // =========================================================================
-            // BEAT 2 (0:06 – 0:11): Triggering the Genetic Lock & The Leap
+            // BEAT 2 (0:06 – 0:11): Heave, Deep Ragdoll Throw, Genetic Lock & Sacrificial Plunge
             // =========================================================================
             Vector3 edgePos = dragEndJaeger;
-            Vector3 breachEntryTarget = new Vector3(breachCenter.x, -1.2f, breachCenter.z - 2.0f);
             Vector3 edgeFwd = faceBreachRot * Vector3.forward;
-            Vector3 slatStartPos = slatternTransform != null ? slatternTransform.position : (edgePos - edgeFwd * 29.5f);
-            Quaternion slatStartRot = slatternTransform != null ? slatternTransform.rotation : (faceBreachRot * Quaternion.Euler(0f, 180f, 0f));
+            Vector3 edgeRight = faceBreachRot * Vector3.right;
+            // Rim stand spot sits cleanly before the obsidian lip teeth (Z = 89.0m)
+            Vector3 rimBracePos = new Vector3(edgePos.x, SampleTerrainY(edgePos.x, 85.8f) + 2.977f, 85.8f);
+            Vector3 breachEntryTarget = new Vector3(breachCenter.x, -1.2f, breachCenter.z - 2.0f);
 
-            // Hard cut to wide three-quarter rear/side elevated angle looking down into the Breach chasm
+            // Switch Gipsy out of Walk into heavy planted CombatIdle for the heave & sacrificial leap
+            if (jaegerAnimator != null)
+            {
+                jaegerAnimator.speed = 0.75f;
+                jaegerAnimator.SetFloat("Speed", 0f);
+                jaegerAnimator.SetBool("InCombat", true);
+                jaegerAnimator.CrossFade("CombatIdle", 0.18f, 0, 0f);
+            }
+
+            // Wide three-quarter rear/side elevated angle looking down into the Breach chasm
             Vector3 beat2CamStart = new Vector3(-28f, 34f, 62f);
-            Vector3 beat2CamEnd = new Vector3(-22f, 29f, 70f);
+            Vector3 beat2CamEnd = new Vector3(-22f, 28f, 71f);
             Vector3 beat2LookStart = new Vector3(4.5f, 2.0f, 112f);
-            Vector3 beat2LookEnd = new Vector3(5.0f, -2.5f, 117f);
+            Vector3 beat2LookEnd = new Vector3(5.2f, -6.5f, 117f);
 
             camTargetPos = beat2CamStart;
             camTargetRot = Quaternion.LookRotation((beat2LookStart - beat2CamStart).normalized, Vector3.up);
             camTargetFov = 54f;
 
             float b2Timer = 0f;
+            float geneticLockTriggerTime = 1.50f;
+            float portalCloseTriggerTime = 3.85f;
             bool releasedSlattern = false;
             bool triggeredGeneticLock = false;
+            bool triggeredCrouchRumble = false;
             bool startedGipsyLeap = false;
-            bool triggeredRiftRoar = false;
+            bool triggeredPortalClose = false;
 
-            Vector3 heavePivotPos = edgePos - edgeFwd * 10.5f + Vector3.up * 4.5f;
-            Quaternion heavePivotRot = faceBreachRot * Quaternion.Euler(14f, 150f, 0f);
+            const float heaveEndTime = 0.85f;
+            const float crouchStartTime = 1.85f;
+            const float leapStartTime = 2.38f;
+            const float leapDuration = 1.62f; // Upright jump & drop into Breach completes cleanly around ~4.00s, leaving ~1.0s for pulse + close shut!
 
             // Phases within 5.0s Beat 2:
-            //   0.0 - 0.9s : Gipsy swings/heaves Slattern up and forward toward the Breach edge by its head
-            //   0.9 - 2.3s : Slattern arcs into the Breach energy field; Genetic Lock triggers at 1.65s!
-            //   2.3 - 2.8s : Membrane rips wide open in blinding violet-blue flare; Gipsy steps onto rim
-            //   2.8 - 5.0s : Gipsy leaps headfirst into the blinding rift right behind Slattern
+            //   0.00 - 0.85s : Planted coil + violent hydraulic heave swinging Slattern's ragdoll over the rim
+            //   0.85 - 1.85s : Slattern enters free-fall ragdoll & plunges DEEP into Breach -> Portal Pulses (stays OPEN & glowing!)
+            //   1.85 - 2.38s : Gipsy coils down into a heavy 2,000-ton crouch at the rim overlooking the open portal
+            //   2.38 - 4.00s : Gipsy jumps upright WITHOUT rotating his body (jumping IK + ballistic arc into the open glowing Breach)
+            //   3.85 - 5.00s : Portal emits closing Pulse #2 and collapses/closes shut behind Gipsy!
             while (b2Timer < geneticLockAndLeapDuration)
             {
                 if (WasSkipPressed())
@@ -484,125 +598,215 @@ namespace PacificRimCutscene
                 b2Timer += dt;
                 float u = Mathf.Clamp01(b2Timer / geneticLockAndLeapDuration);
 
-                // Smoothly pull camera slightly forward along the elevated 3/4 rear/side angle
+                // Smoothly pull camera slightly forward & track downward into the Breach glow as Gipsy plunges
                 float camU = Mathf.SmoothStep(0f, 1f, u);
                 camTargetPos = Vector3.Lerp(beat2CamStart, beat2CamEnd, camU);
-                Vector3 lookPt = Vector3.Lerp(beat2LookStart, beat2LookEnd, camU);
+                float plungeLookBias = b2Timer >= leapStartTime ? Mathf.SmoothStep(0f, 1f, (b2Timer - leapStartTime) / (geneticLockAndLeapDuration - leapStartTime)) : 0f;
+                Vector3 lookPt = Vector3.Lerp(beat2LookStart, beat2LookEnd, Mathf.Clamp01(camU * 0.72f + plungeLookBias * 0.48f));
                 camTargetRot = Quaternion.LookRotation((lookPt - camTargetPos).normalized, Vector3.up);
-                camTargetFov = Mathf.Lerp(54f, 50f, camU);
+                camTargetFov = Mathf.Lerp(54f, 49f, camU);
 
-                if (b2Timer < 0.90f)
+                if (b2Timer < heaveEndTime)
                 {
-                    // Wind-up & heave swing
-                    float hu = Mathf.Clamp01(b2Timer / 0.90f);
-                    ikGripHead = hu < 0.72f;
-                    ikHeaveForward = hu >= 0.35f;
-                    heaveAnimWeight = Mathf.SmoothStep(0f, 1f, hu);
-                    heaveForwardT = hu;
-                    headAttachedToGrip = hu < 0.72f;
-                    jaegerForwardLeanDeg = Mathf.Lerp(22f, 10f, hu);
+                    // Phase 2a: Two-stage wide right-flank hammer heave (never swings across Gipsy's body!)
+                    float hu = Mathf.Clamp01(b2Timer / heaveEndTime);
+                    float coilU = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(hu / 0.34f));
+                    float driveU = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((hu - 0.30f) / 0.70f));
 
-                    // Advance Gipsy slightly up to rim
-                    Vector3 jP = Vector3.Lerp(edgePos, edgePos + edgeFwd * 2.5f, hu);
+                    ikGripHead = hu < 0.28f;
+                    ikHeaveForward = hu >= 0.26f;
+                    heaveAnimWeight = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((hu - 0.24f) / 0.30f));
+                    heaveForwardT = driveU;
+                    gripRightFistWeight = 1f;
+                    braceLeftArmWeight = Mathf.Lerp(0.72f, 0.88f, hu);
+
+                    jaegerCrouchWeight = Mathf.Lerp(0.65f, 0.90f, coilU) * (1f - driveU * 0.62f);
+                    jaegerCrouchDropMeters = 2.35f;
+                    jaegerForwardLeanDeg = Mathf.Lerp(26f, 14f, coilU) + Mathf.Lerp(0f, 10f, driveU);
+                    jaegerTorsoTwistDeg = Mathf.Lerp(14f, 36f, coilU) - driveU * 38f; // +36° right windup -> -2° forward release (clears Gipsy's flank)
+                    jaegerHeadTiltDeg = Mathf.Lerp(4f, 10f, driveU);
+
+                    isHeavingRagdoll = true;
+                    heaveAssistT = driveU;
+
+                    // Swing Slattern's multi-ton torso UP and OUTWARD along Gipsy's right flank (strictly +edgeRight clearance!)
+                    Vector3 heaveArcVel = edgeFwd * Mathf.Lerp(8f, 26f, driveU)
+                        + Vector3.up * Mathf.Lerp(5f, 20f, Mathf.Sin(driveU * Mathf.PI * 0.85f))
+                        + edgeRight * Mathf.Lerp(11f, 3.5f, driveU);
+                    currentHeaveVelocityTarget = heaveArcVel;
+
+                    Vector3 jP = Vector3.Lerp(edgePos, rimBracePos, Mathf.SmoothStep(0f, 1f, hu * 0.65f));
                     jP.y = SampleTerrainY(jP.x, jP.z) + 2.977f;
                     SetJaegerPose(jP, faceBreachRot);
 
-                    Vector3 swingArc = Vector3.Lerp(slatStartPos, heavePivotPos, Mathf.SmoothStep(0f, 1f, hu));
-                    SetSlatternPose(swingArc, Quaternion.Slerp(slatStartRot, heavePivotRot, Mathf.SmoothStep(0f, 1f, hu)));
+                    if (hu >= 0.32f && hu <= 0.40f && cameraShake != null)
+                    {
+                        cameraShake.Shake(0.45f, 0.35f);
+                    }
                 }
                 else
                 {
                     if (!releasedSlattern)
                     {
                         releasedSlattern = true;
+                        isHeavingRagdoll = false;
                         ikGripHead = false;
                         ikHeaveForward = true;
-                        headAttachedToGrip = false;
-                        PacificRimAudioManager.Instance?.PlayHydraulicServo(edgePos + Vector3.up * 12f, 1.0f);
-                        PacificRimAudioManager.Instance?.PlayAttackWhoosh(edgePos + Vector3.up * 14f, true);
+                        gripRightFistWeight = 0.25f;
+
+                        // Release ragdoll grip and hurl Slattern slightly right of Gipsy straight into the 88m Breach opening (zero overlap!)
+                        if (slatternRagdoll != null)
+                        {
+                            Vector3 slatternBreachTarget = new Vector3(breachEntryTarget.x + 4.8f, breachEntryTarget.y, breachEntryTarget.z + 2f);
+                            Vector3 throwOrigin = slatternRagdoll.TorsoWorldCenter;
+                            Vector3 toBreach = new Vector3(slatternBreachTarget.x - throwOrigin.x, 0f, slatternBreachTarget.z - throwOrigin.z);
+                            Vector3 throwDir = toBreach.sqrMagnitude > 0.1f ? toBreach.normalized : edgeFwd;
+                            Vector3 throwVel = throwDir * 27.0f + Vector3.up * 8.5f;
+                            Vector3 tumbleTorque = edgeRight * 1.45f - edgeFwd * 0.35f;
+                            slatternRagdoll.ReleaseAndThrowIntoBreach(throwVel, tumbleTorque, slatternBreachTarget);
+                        }
+
+                        PacificRimAudioManager.Instance?.PlayHydraulicServo(rimBracePos + Vector3.up * 12f, 1.0f);
+                        PacificRimAudioManager.Instance?.PlayAttackWhoosh(rimBracePos + Vector3.up * 14f, true);
+                        if (cameraShake != null) cameraShake.TriggerPlayerHitFeedback(isHeavy: false);
                     }
 
-                    // Slattern body arcs forward and plunges into the Breach membrane (0.9s -> 2.8s)
-                    float slatThrowU = Mathf.Clamp01((b2Timer - 0.90f) / 1.90f);
-                    Vector3 arcPeak = new Vector3(breachEntryTarget.x, 12.0f, 100f);
-                    Vector3 slatDropEnd = new Vector3(breachEntryTarget.x, -26f, breachEntryTarget.z + 14f);
-                    Vector3 curSlatPos = QuadraticBezier(
-                        heavePivotPos,
-                        arcPeak,
-                        slatDropEnd,
-                        slatThrowU);
-                    Quaternion curSlatRot = Quaternion.Slerp(
-                        heavePivotRot,
-                        faceBreachRot * Quaternion.Euler(76f, 165f, -12f),
-                        slatThrowU);
-                    SetSlatternPose(curSlatPos, curSlatRot);
-
-                    // Genetic lock triggers as Slattern's body penetrates the membrane (~1.65s into Beat 2)
-                    if (!triggeredGeneticLock && b2Timer >= 1.65f)
+                    // Dynamic Genetic Lock impact trigger: fires when Slattern's ragdoll pierces the Breach membrane
+                    // (with safety fallback at 1.65s so timeline stays rock-solid)
+                    if (!triggeredGeneticLock)
                     {
-                        triggeredGeneticLock = true;
-                        TriggerGeneticLockSequence();
+                        bool ragdollPierced = slatternRagdoll != null && slatternRagdoll.HasPiercedBreachPlane(1.8f);
+                        if (ragdollPierced || b2Timer >= 1.50f)
+                        {
+                            triggeredGeneticLock = true;
+                            geneticLockTriggerTime = b2Timer;
+                            if (breachMembraneMat != null && slatternRagdoll != null)
+                            {
+                                Vector3 hitPos = slatternRagdoll.HeadWorldPos;
+                                Vector3 memOrigin = breachMembraneObj != null ? breachMembraneObj.transform.position : breachCenter;
+                                float uHit = Mathf.Clamp01(0.5f + (hitPos.x - memOrigin.x) / 88f);
+                                float vHit = Mathf.Clamp01(0.5f + (hitPos.z - memOrigin.z) / 56f);
+                                breachMembraneMat.SetVector(IdHitUV, new Vector4(uHit, vHit, 0f, 0f));
+                            }
+                            TriggerGeneticLockSequence();
+                        }
                     }
 
-                    if (triggeredGeneticLock)
+                    if (triggeredGeneticLock && !triggeredPortalClose)
                     {
-                        float lockElapsed = b2Timer - 1.65f;
-                        UpdateGeneticLockMembrane(lockElapsed);
+                        UpdateGeneticLockMembrane(Mathf.Max(0f, b2Timer - geneticLockTriggerTime), -1f);
+                    }
+                    else if (triggeredPortalClose)
+                    {
+                        UpdateGeneticLockMembrane(Mathf.Max(0f, b2Timer - geneticLockTriggerTime), Mathf.Max(0f, b2Timer - portalCloseTriggerTime));
                     }
 
-                    // Gipsy braces at rim (0.9s -> 2.75s) then leaps headfirst into the blinding rift (2.75s -> 5.0s)
-                    if (b2Timer < 2.75f)
+                    if (b2Timer < crouchStartTime)
                     {
-                        float stepU = Mathf.Clamp01((b2Timer - 0.90f) / 1.85f);
-                        heaveAnimWeight = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((b2Timer - 0.90f) / 0.8f));
-                        jaegerForwardLeanDeg = Mathf.Lerp(10f, 28f, stepU);
-                        Vector3 rimPos = Vector3.Lerp(edgePos + (faceBreachRot * Vector3.forward) * 2.5f, edgePos + (faceBreachRot * Vector3.forward) * 7.0f, stepU);
-                        rimPos.y = SampleTerrainY(rimPos.x, rimPos.z) + 2.977f;
-                        SetJaegerPose(rimPos, faceBreachRot);
+                        // Phase 2c: Follow-through settle into heavy braced watch on the rim (no clipping into obsidian teeth!)
+                        float settleT = Mathf.Clamp01((b2Timer - heaveEndTime) / (crouchStartTime - heaveEndTime));
+                        float smoothSettle = Mathf.SmoothStep(0f, 1f, settleT);
+                        heaveAnimWeight = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((b2Timer - heaveEndTime) / 0.52f));
+                        ikHeaveForward = heaveAnimWeight > 0.02f;
+                        braceLeftArmWeight = Mathf.Lerp(0.85f, 0.35f, smoothSettle);
+                        gripRightFistWeight = Mathf.Lerp(0.25f, 0.5f, smoothSettle);
+
+                        jaegerCrouchWeight = Mathf.Lerp(0.32f, 0.25f, smoothSettle);
+                        jaegerCrouchDropMeters = 2.2f;
+                        jaegerForwardLeanDeg = Mathf.Lerp(26f, 15f, smoothSettle);
+                        jaegerTorsoTwistDeg = Mathf.Lerp(-24f, 0f, smoothSettle);
+                        jaegerHeadTiltDeg = Mathf.Lerp(10f, 18f, smoothSettle);
+
+                        Vector3 watchPos = Vector3.Lerp(edgePos + edgeFwd * 1.6f, rimBracePos, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(settleT * 1.4f)));
+                        watchPos.y = SampleTerrainY(watchPos.x, watchPos.z) + 2.977f;
+                        SetJaegerPose(watchPos, faceBreachRot);
+                    }
+                    else if (b2Timer < leapStartTime)
+                    {
+                        // Phase 2d: Heavy 2,000-ton Anticipation Crouch on the rim peering down into the tearing abyss
+                        if (!triggeredCrouchRumble)
+                        {
+                            triggeredCrouchRumble = true;
+                            PacificRimAudioManager.Instance?.PlayHydraulicServo(rimBracePos + Vector3.up * 10f, 0.9f);
+                            PacificRimAudioManager.Instance?.PlayArmorCreak(rimBracePos + Vector3.up * 12f, 0.85f);
+                            if (cameraShake != null) cameraShake.TriggerStompFeedback(0.50f);
+                            EmitFootstepSiltBurst(rimBracePos);
+                        }
+
+                        float cu = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((b2Timer - crouchStartTime) / (leapStartTime - crouchStartTime)));
+                        ikHeaveForward = false;
+                        heaveAnimWeight = 0f;
+                        braceLeftArmWeight = Mathf.Lerp(0.35f, 0.85f, cu);
+                        gripRightFistWeight = 0.85f;
+                        jaegerCrouchWeight = Mathf.Lerp(0.25f, 1.0f, cu);
+                        jaegerCrouchDropMeters = 2.65f;
+                        jaegerForwardLeanDeg = Mathf.Lerp(15f, 29f, cu);
+                        jaegerTorsoTwistDeg = 0f;
+                        jaegerHeadTiltDeg = Mathf.Lerp(18f, 22f, cu);
+
+                        SetJaegerPose(rimBracePos, faceBreachRot);
                     }
                     else
                     {
+                        // Phase 2e: Gipsy jumps WITHOUT rotating his body (pure jumping IK + upright arc) -> Portal Pulses then Closes Shut
                         if (!startedGipsyLeap)
                         {
                             startedGipsyLeap = true;
                             ikHeaveForward = false;
-                            if (jaegerAnimator != null)
-                            {
-                                jaegerAnimator.speed = 0.6f;
-                                jaegerAnimator.CrossFade("Idle", 0.15f, 0, 0f);
-                            }
-                            if (visualSockets != null)
-                            {
-                                visualSockets.TriggerRocketBlast(1.6f);
-                            }
-                            PacificRimAudioManager.Instance?.PlayRocketIgnition(jaegerTransform.position + Vector3.up * 12f);
-                            if (cameraShake != null) cameraShake.TriggerPlayerHitFeedback(isHeavy: true);
+                            braceLeftArmWeight = 0f;
+                            gripRightFistWeight = 1f;
+
+                            PacificRimAudioManager.Instance?.PlayOceanFootstep(rimBracePos, 1.85f);
+                            PacificRimAudioManager.Instance?.PlayHydraulicServo(rimBracePos + Vector3.up * 11f, 1.0f);
+                            if (cameraShake != null) cameraShake.TriggerStompFeedback(0.85f);
+                            EmitFootstepSiltBurst(rimBracePos);
                         }
 
-                        float leapU = Mathf.Clamp01((b2Timer - 2.75f) / (geneticLockAndLeapDuration - 2.75f));
-                        jaegerDiveBlend = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(leapU * 1.4f));
+                        float leapElapsed = b2Timer - leapStartTime;
+                        float leapU = Mathf.Clamp01(leapElapsed / leapDuration);
 
-                        Vector3 leapStart = edgePos + (faceBreachRot * Vector3.forward) * 7.0f;
-                        Vector3 leapApex = new Vector3(breachEntryTarget.x, 14.5f, 103.5f);
-                        Vector3 leapEnd = new Vector3(breachEntryTarget.x, -22f, breachEntryTarget.z + 2f);
-                        Vector3 divePos = QuadraticBezier(leapStart, leapApex, leapEnd, Mathf.Pow(leapU, 0.92f));
+                        jaegerPlungeTime = leapElapsed;
+                        jaegerDiveBlend = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(leapU * 4.2f));
+                        jaegerCrouchWeight = Mathf.Lerp(1.0f, 0f, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(leapU * 4.8f)));
+                        jaegerForwardLeanDeg = Mathf.Lerp(29f, 8f, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(leapU * 3.2f)));
+                        jaegerTorsoTwistDeg = 0f;
+                        jaegerHeadTiltDeg = Mathf.Lerp(22f, 14f, leapU);
 
-                        // Rotate swiftly headfirst into the chasm
-                        Quaternion diveRot = Quaternion.Slerp(faceBreachRot, faceBreachRot * Quaternion.Euler(132f, 0f, 0f), Mathf.Pow(leapU, 0.58f));
-                        SetJaegerPose(divePos, diveRot);
+                        // Heavy upright vault: pushes UP & FORWARD cleanly over rim teeth (Z=89), then drops feet-first into the glowing Breach center
+                        Vector3 jumpApexPos = new Vector3(
+                            Mathf.Lerp(rimBracePos.x, breachEntryTarget.x, 0.52f),
+                            rimBracePos.y + 5.8f,
+                            101.5f);
+                        Vector3 jumpEndPos = new Vector3(breachEntryTarget.x, -26.5f, breachEntryTarget.z - 2.0f);
 
-                        // Blinding rift surge right as Gipsy hits the chasm core (last 0.28s before hard cut)
-                        if (!triggeredRiftRoar && leapU >= 0.72f)
+                        float pathT = Mathf.Pow(leapU, 1.12f);
+                        Vector3 curRootPos = QuadraticBezier(rimBracePos, jumpApexPos, jumpEndPos, pathT);
+                        SetJaegerPose(curRootPos, faceBreachRot); // Never rotate body into the ground!
+
+                        if (leapU < 0.92f && dragBubblesPs != null && Random.value < dt * 28f)
                         {
-                            triggeredRiftRoar = true;
-                            PlayOneShot2D("Magic Spell_Simple Swoosh_6", 0.9f, 0.75f);
-                            PlayOneShot2D("EmpDischargeBlast", 0.75f, 1.15f);
+                            Vector3 chestApprox = curRootPos + Vector3.up * 14f;
+                            EmitDragSiltAndBubbles(chestApprox, chestApprox);
                         }
 
-                        if (leapU >= 0.85f && fadeOverlayImage != null && fadeOverlayGroup != null)
+                        // Trigger Portal Pulse #2 + Collapse Shut right as Gipsy vanishes beneath the glowing portal surface (~3.85s)
+                        if (!triggeredPortalClose && b2Timer >= 3.85f)
                         {
-                            fadeOverlayImage.color = new Color(0.68f, 0.85f, 1.0f, 1f);
-                            fadeOverlayGroup.alpha = Mathf.SmoothStep(0f, 0.85f, Mathf.Clamp01((leapU - 0.85f) / 0.15f));
+                            triggeredPortalClose = true;
+                            portalCloseTriggerTime = b2Timer;
+                            if (breachMembraneMat != null)
+                            {
+                                breachMembraneMat.SetVector(IdHitUV, new Vector4(0.5f, 0.5f, 0f, 0f));
+                            }
+                            TriggerGeneticLockSequence();
+                            PlayOneShot2D("Magic Spell_Simple Swoosh_6", 0.9f, 0.72f);
+                        }
+
+                        // Brief dark abyssal cut fade only during the final 0.22s AFTER the portal has visibly pulsed & snapped shut
+                        if (b2Timer >= 4.78f && fadeOverlayImage != null && fadeOverlayGroup != null)
+                        {
+                            fadeOverlayImage.color = new Color(0.02f, 0.04f, 0.10f, 1f);
+                            fadeOverlayGroup.alpha = Mathf.SmoothStep(0f, 0.95f, Mathf.Clamp01((b2Timer - 4.78f) / 0.22f));
                         }
                     }
                 }
@@ -615,6 +819,154 @@ namespace PacificRimCutscene
             // 0:11 Hard Cut -> Activate preloaded The Anteverse scene!
             // =========================================================================
             HandOffToAnteverseScene();
+        }
+
+        private void FixedUpdate()
+        {
+            if (!isCutsceneRunning || !useRagdollPhysics || slatternRagdoll == null) return;
+
+            if (jaegerTransform != null)
+            {
+                bool shieldActive = jaegerDiveBlend < 0.05f;
+                float shieldRadius = isHeavingRagdoll ? 4.25f : (ikGripHead ? 2.85f : 4.05f);
+                slatternRagdoll.UpdateJaegerShield(jaegerTransform.position - slatternDragDirection * 0.35f, shieldRadius, shieldActive);
+            }
+
+            if (ikGripHead)
+            {
+                slatternRagdoll.MoveGripAnchor(gripWorldTarget);
+                slatternRagdoll.ApplyDragDownwardWeight(18f);
+            }
+            else if (isHeavingRagdoll)
+            {
+                Vector3 fwd = slatternDragDirection;
+                Vector3 rgt = Vector3.Cross(Vector3.up, fwd).normalized;
+                Vector3 heaveGripTarget = jaegerTransform != null
+                    ? jaegerTransform.position + fwd * Mathf.Lerp(-2.2f, 8.2f, heaveAssistT) + rgt * (5.2f + Mathf.Sin(heaveAssistT * Mathf.PI) * 2.2f) + Vector3.up * Mathf.Lerp(9.8f, 20.5f, heaveAssistT)
+                    : gripWorldTarget;
+                gripWorldTarget = heaveGripTarget;
+                slatternRagdoll.MoveGripAnchor(heaveGripTarget);
+                if (heaveAssistT > 0.02f)
+                {
+                    slatternRagdoll.ApplyHeaveAssist(currentHeaveVelocityTarget, heaveAssistT);
+                }
+            }
+            else
+            {
+                slatternRagdoll.StepFreeFallIntoBreach(Time.fixedDeltaTime);
+            }
+        }
+
+        private Vector3 ComputeDragGripTarget(Vector3 jaegerPos, Vector3 fwd, Vector3 rgt)
+        {
+            return jaegerPos + rgt * 2.55f - fwd * 1.9f + Vector3.up * 8.6f;
+        }
+
+        private void UncurlSlatternTailsForDrag(Quaternion slatRot)
+        {
+            if (slatternTransform == null) return;
+            Transform b025 = null, tC = null, tL = null, tR = null;
+            foreach (var t in slatternTransform.GetComponentsInChildren<Transform>(true))
+            {
+                switch (t.name)
+                {
+                    case "Bone.025": b025 = t; break;
+                    case "TailBone": tC = t; break;
+                    case "TailBone.L": tL = t; break;
+                    case "TailBone.R": tR = t; break;
+                }
+            }
+            // Note: slatRot has 180 deg yaw so Slattern faces +Z (Gipsy). Tail trail direction behind Slattern is -Z (-(slatRot * forward)? Wait: at rot=0 head is -Z, so at rot=180 head is +Z and behind hips is -Z = slatRot * Vector3.forward!)
+            Vector3 behindHipsDir = slatRot * Vector3.forward;
+            Vector3 rightDir = slatRot * Vector3.right;
+            Vector3 tailTrailDir = (behindHipsDir + Vector3.down * 0.10f).normalized;
+
+            if (b025 != null && tC != null)
+            {
+                Vector3 curTailFwd = tC.position - b025.position;
+                if (curTailFwd.sqrMagnitude > 0.01f)
+                {
+                    Quaternion swingBack = Quaternion.FromToRotation(curTailFwd.normalized, (behindHipsDir + Vector3.down * 0.35f).normalized);
+                    b025.rotation = Quaternion.Slerp(Quaternion.identity, swingBack, 0.72f) * b025.rotation;
+                }
+            }
+            if (tC != null)
+            {
+                Transform tCNext = tC.Find("TailBone.002");
+                if (tCNext != null)
+                {
+                    Vector3 curDir = tCNext.position - tC.position;
+                    if (curDir.sqrMagnitude > 0.01f)
+                        tC.rotation = Quaternion.FromToRotation(curDir.normalized, tailTrailDir) * tC.rotation;
+                }
+            }
+            if (tL != null)
+            {
+                Transform tLNext = tL.Find("TailBone.L.001");
+                if (tLNext != null)
+                {
+                    Vector3 curDir = tLNext.position - tL.position;
+                    if (curDir.sqrMagnitude > 0.01f)
+                        tL.rotation = Quaternion.FromToRotation(curDir.normalized, (tailTrailDir - rightDir * 0.38f).normalized) * tL.rotation;
+                }
+            }
+            if (tR != null)
+            {
+                Transform tRNext = tR.Find("TailBone.R.001");
+                if (tRNext != null)
+                {
+                    Vector3 curDir = tRNext.position - tR.position;
+                    if (curDir.sqrMagnitude > 0.01f)
+                        tR.rotation = Quaternion.FromToRotation(curDir.normalized, (tailTrailDir + rightDir * 0.38f).normalized) * tR.rotation;
+                }
+            }
+        }
+
+        private void AlignSlatternSkullToInitialGrip(Vector3 targetSkullWorldPos)
+        {
+            if (slatternTransform == null) return;
+            Transform upperHead = slatternHeadBone;
+            Transform upperHeadEnd = upperHead != null ? upperHead.Find("UpperHead_end") : null;
+            Vector3 curSkull = upperHead != null
+                ? (upperHeadEnd != null ? Vector3.Lerp(upperHead.position, upperHeadEnd.position, 0.42f) : upperHead.position)
+                : slatternTransform.position;
+            Vector3 horizShift = new Vector3(targetSkullWorldPos.x - curSkull.x, 0f, targetSkullWorldPos.z - curSkull.z);
+            slatternTransform.position += horizShift;
+            AlignHeadNeckChainToTarget(targetSkullWorldPos);
+        }
+
+        private void EmitFootstepSiltBurst(Vector3 footPos)
+        {
+            if (dragSiltPs != null)
+            {
+                for (int i = 0; i < 10; i++)
+                {
+                    float ang = (i / 10f) * Mathf.PI * 2f + Random.Range(-0.2f, 0.2f);
+                    Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                    dragSiltPs.Emit(new ParticleSystem.EmitParams
+                    {
+                        position = footPos + radial * Random.Range(1.0f, 3.2f) + Vector3.up * 0.4f,
+                        velocity = radial * Random.Range(2.4f, 5.2f) + Vector3.up * Random.Range(0.8f, 2.4f),
+                        startSize = Random.Range(4.2f, 8.8f),
+                        startLifetime = Random.Range(1.8f, 3.4f),
+                        startColor = new Color(0.16f, 0.18f, 0.24f, 0.40f)
+                    }, 1);
+                }
+            }
+            if (dragBubblesPs != null)
+            {
+                for (int i = 0; i < 8; i++)
+                {
+                    dragBubblesPs.Emit(new ParticleSystem.EmitParams
+                    {
+                        position = footPos + Random.insideUnitSphere * 2.2f + Vector3.up * 0.8f,
+                        velocity = Vector3.up * Random.Range(3.2f, 6.8f) + Random.insideUnitSphere * 1.1f,
+                        startSize = Random.Range(0.10f, 0.28f),
+                        startLifetime = Random.Range(1.2f, 2.4f),
+                        startColor = new Color(0.78f, 0.92f, 1.0f, 0.70f)
+                    }, 1);
+                }
+            }
         }
 
         private void PrepareEndingStage()
@@ -871,6 +1223,12 @@ namespace PacificRimCutscene
             if (mat.HasProperty(IdBaseColor)) mat.SetColor(IdBaseColor, new Color(2.4f, 1.8f, 1.0f, 1f));
             if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
             if (mat.HasProperty("_Blend")) mat.SetFloat("_Blend", 2f);
+            if (mat.HasProperty("_SrcBlend")) mat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+            if (mat.HasProperty("_DstBlend")) mat.SetFloat("_DstBlend", (float)BlendMode.One);
+            if (mat.HasProperty("_ZWrite")) mat.SetFloat("_ZWrite", 0f);
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.EnableKeyword("_BLENDMODE_ADD");
+            mat.renderQueue = (int)RenderQueue.Transparent;
             rend.sharedMaterial = mat;
             rend.shadowCastingMode = ShadowCastingMode.Off;
 
@@ -941,7 +1299,11 @@ namespace PacificRimCutscene
             if (breachTransform == null) return;
 
             runtimeBreachMaterials.Clear();
+            breachMatBaseColors.Clear();
+            breachMatEmColors.Clear();
+            breachGodRayTransforms.Clear();
             breachLights.Clear();
+            breachLightBaseIntensities.Clear();
 
             Color magentaHdr = new Color(1.65f, 0.22f, 3.4f, 1f);
             Color blueHdr = new Color(0.14f, 1.05f, 3.2f, 1f);
@@ -968,6 +1330,9 @@ namespace PacificRimCutscene
                     if (m.HasProperty(IdIntensity)) m.SetFloat(IdIntensity, 1.15f);
                     r.sharedMaterial = m;
                     runtimeBreachMaterials.Add(m);
+                    breachMatBaseColors.Add(rayCol);
+                    breachMatEmColors.Add(Color.black);
+                    breachGodRayTransforms.Add(r.transform);
                 }
                 else
                 {
@@ -994,6 +1359,8 @@ namespace PacificRimCutscene
                         }
                         mats[i] = m;
                         runtimeBreachMaterials.Add(m);
+                        breachMatBaseColors.Add(c);
+                        breachMatEmColors.Add(em);
                         modified = true;
                     }
                     if (modified) r.sharedMaterials = mats;
@@ -1006,6 +1373,7 @@ namespace PacificRimCutscene
                 l.color = l.gameObject.name.Contains("Rim") ? new Color(0.68f, 0.22f, 1.0f, 1f) : new Color(0.18f, 0.52f, 1.0f, 1f);
                 l.intensity *= 0.85f;
                 breachLights.Add(l);
+                breachLightBaseIntensities.Add(l.intensity);
             }
 
             // Build shimmering violet-and-blue Breach Bio-Membrane spanning the chasm opening
@@ -1027,6 +1395,7 @@ namespace PacificRimCutscene
             breachMembraneMat.SetFloat(IdRippleProgress, 0f);
             breachMembraneMat.SetVector(IdHitUV, new Vector4(0.5f, 0.42f, 0f, 0f));
             breachMembraneMat.SetFloat(IdTearAmount, 0f);
+            breachMembraneMat.SetFloat(IdCloseAmount, 0f);
             breachMembraneMat.SetFloat(IdFlareIntensity, 1.45f);
             mr.sharedMaterial = breachMembraneMat;
             mr.shadowCastingMode = ShadowCastingMode.Off;
@@ -1049,24 +1418,86 @@ namespace PacificRimCutscene
             if (cameraShake != null) cameraShake.TriggerPlayerHitFeedback(isHeavy: true);
         }
 
-        private void UpdateGeneticLockMembrane(float lockElapsed)
+        private void UpdateGeneticLockMembrane(float lockElapsed, float closeElapsed)
         {
+            float closePhase = closeElapsed >= 0f ? Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((closeElapsed - 0.24f) / 0.62f)) : 0f;
+            float envFade = 1f - closePhase;
+
             if (breachMembraneMat != null)
             {
-                float rippleT = Mathf.Clamp01(lockElapsed / 1.15f);
-                float tearT = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((lockElapsed - 0.18f) / 0.95f));
-                float flarePulse = 1.45f + Mathf.Sin(Mathf.Clamp01(lockElapsed / 1.35f) * Mathf.PI) * 5.2f + tearT * 1.6f;
+                if (closeElapsed < 0f)
+                {
+                    // Pulse #1 (Slattern enters): strong shockwave rings + HDR flare pulse, portal stays WIDE OPEN & GLOWING!
+                    float rippleT = Mathf.Clamp01(lockElapsed / 1.15f);
+                    float pulseSin = Mathf.Sin(Mathf.Clamp01(lockElapsed / 1.15f) * Mathf.PI);
+                    float flarePulse = 1.85f + pulseSin * 4.2f;
 
-                breachMembraneMat.SetFloat(IdRippleProgress, rippleT * 1.65f);
-                breachMembraneMat.SetFloat(IdTearAmount, tearT);
-                breachMembraneMat.SetFloat(IdFlareIntensity, flarePulse);
+                    breachMembraneMat.SetFloat(IdRippleProgress, rippleT * 1.70f);
+                    breachMembraneMat.SetFloat(IdTearAmount, 0f);
+                    breachMembraneMat.SetFloat(IdCloseAmount, 0f);
+                    breachMembraneMat.SetFloat(IdFlareIntensity, flarePulse);
+                }
+                else
+                {
+                    // Pulse #2 + Closes Shut (after Gipsy plunges in): bright cyan-white pulse then iris-collapse shut to 0
+                    float pulseT = Mathf.Clamp01(closeElapsed / 0.36f);
+                    float pulseSin = Mathf.Sin(pulseT * Mathf.PI);
+                    float flarePulse = Mathf.Lerp(2.1f + pulseSin * 5.2f, 0.4f, Mathf.Pow(closePhase, 1.5f));
+
+                    breachMembraneMat.SetFloat(IdRippleProgress, pulseT * 1.60f);
+                    breachMembraneMat.SetFloat(IdTearAmount, 0f);
+                    breachMembraneMat.SetFloat(IdCloseAmount, closePhase);
+                    breachMembraneMat.SetFloat(IdFlareIntensity, flarePulse);
+                }
             }
 
             if (breachFlareLight != null)
             {
-                float spike = Mathf.Sin(Mathf.Clamp01(lockElapsed / 1.5f) * Mathf.PI);
-                breachFlareLight.intensity = 950f + spike * 2800f;
-                breachFlareLight.color = Color.Lerp(new Color(0.58f, 0.38f, 1.0f), new Color(0.68f, 0.85f, 1.0f), spike);
+                if (closeElapsed < 0f)
+                {
+                    float spike = Mathf.Sin(Mathf.Clamp01(lockElapsed / 1.25f) * Mathf.PI);
+                    breachFlareLight.intensity = 1250f + spike * 2600f;
+                    breachFlareLight.color = Color.Lerp(new Color(0.58f, 0.38f, 1.0f), new Color(0.68f, 0.85f, 1.0f), spike);
+                }
+                else
+                {
+                    float spike = Mathf.Sin(Mathf.Clamp01(closeElapsed / 0.38f) * Mathf.PI);
+                    breachFlareLight.intensity = (1350f + spike * 3200f) * envFade;
+                    breachFlareLight.color = Color.Lerp(new Color(0.58f, 0.38f, 1.0f), new Color(0.75f, 0.90f, 1.0f), spike);
+                }
+            }
+
+            if (closeElapsed >= 0f)
+            {
+                for (int i = 0; i < breachLights.Count && i < breachLightBaseIntensities.Count; i++)
+                {
+                    if (breachLights[i] != null)
+                        breachLights[i].intensity = breachLightBaseIntensities[i] * envFade;
+                }
+                for (int i = 0; i < runtimeBreachMaterials.Count; i++)
+                {
+                    var m = runtimeBreachMaterials[i];
+                    if (m == null) continue;
+                    if (i < breachMatBaseColors.Count)
+                    {
+                        Color bc = breachMatBaseColors[i] * envFade;
+                        if (m.HasProperty(IdBaseColor)) m.SetColor(IdBaseColor, bc);
+                        if (m.HasProperty(IdColor)) m.SetColor(IdColor, bc);
+                    }
+                    if (i < breachMatEmColors.Count && m.HasProperty(IdEmissionColor))
+                    {
+                        m.SetColor(IdEmissionColor, breachMatEmColors[i] * envFade);
+                    }
+                    if (m.HasProperty(IdIntensity))
+                    {
+                        m.SetFloat(IdIntensity, 1.15f * envFade);
+                    }
+                }
+                for (int i = 0; i < breachGodRayTransforms.Count; i++)
+                {
+                    if (breachGodRayTransforms[i] != null)
+                        breachGodRayTransforms[i].localScale = new Vector3(1f - closePhase * 0.92f, 1f, 1f - closePhase * 0.92f);
+                }
             }
         }
 
@@ -1196,55 +1627,142 @@ namespace PacificRimCutscene
 
             if (applyLateUpdatePoses && jaegerTransform != null)
             {
-                Vector3 rightAxis = jaegerTransform.right;
-                if (jaegerForwardLeanDeg > 0.01f && jaegerDiveBlend < 0.99f)
+                Vector3 fwd = jaegerTransform.forward;
+                Vector3 up = jaegerTransform.up;
+                Vector3 rgt = jaegerTransform.right;
+
+                // 1. Capture animated foot plant targets BEFORE dropping pelvis for heavy crouch/haul
+                float crouchW = Mathf.Clamp01(jaegerCrouchWeight) * (1f - Mathf.Clamp01(jaegerDiveBlend));
+                Vector3 plantedFootL = footL != null ? footL.position : Vector3.zero;
+                Vector3 plantedFootR = footR != null ? footR.position : Vector3.zero;
+
+                if (crouchW > 0.005f && hipsBone != null)
+                {
+                    hipsBone.position += Vector3.down * (jaegerCrouchDropMeters * crouchW) - fwd * (0.45f * crouchW);
+                }
+
+                // 2. Heavy forward lean & hauling shoulder/torso twist
+                if (jaegerDiveBlend < 0.99f)
                 {
                     float w = 1f - jaegerDiveBlend;
-                    if (hipsBone != null) hipsBone.rotation = Quaternion.AngleAxis(jaegerForwardLeanDeg * 0.32f * w, rightAxis) * hipsBone.rotation;
-                    if (spine1Bone != null) spine1Bone.rotation = Quaternion.AngleAxis(jaegerForwardLeanDeg * 0.38f * w, rightAxis) * spine1Bone.rotation;
-                    if (chestBone != null) chestBone.rotation = Quaternion.AngleAxis(jaegerForwardLeanDeg * 0.30f * w, rightAxis) * chestBone.rotation;
+                    if (Mathf.Abs(jaegerForwardLeanDeg) > 0.01f)
+                    {
+                        if (hipsBone != null) hipsBone.rotation = Quaternion.AngleAxis(jaegerForwardLeanDeg * 0.30f * w, rgt) * hipsBone.rotation;
+                        if (spine1Bone != null) spine1Bone.rotation = Quaternion.AngleAxis(jaegerForwardLeanDeg * 0.38f * w, rgt) * spine1Bone.rotation;
+                        if (chestBone != null) chestBone.rotation = Quaternion.AngleAxis(jaegerForwardLeanDeg * 0.32f * w, rgt) * chestBone.rotation;
+                    }
+                    if (Mathf.Abs(jaegerTorsoTwistDeg) > 0.01f)
+                    {
+                        if (spine1Bone != null) spine1Bone.rotation = Quaternion.AngleAxis(jaegerTorsoTwistDeg * 0.45f * w, Vector3.up) * spine1Bone.rotation;
+                        if (chestBone != null) chestBone.rotation = Quaternion.AngleAxis(jaegerTorsoTwistDeg * 0.55f * w, Vector3.up) * chestBone.rotation;
+                    }
+                    if (Mathf.Abs(jaegerHeadTiltDeg) > 0.01f && headBone != null)
+                    {
+                        headBone.rotation = Quaternion.AngleAxis(jaegerHeadTiltDeg * w, rgt) * headBone.rotation;
+                    }
                 }
 
-                // Right arm reaching back/down beside right hip to grip Slattern's skull/head
+                // 3. Re-solve grounded legs onto planted feet during heavy crouch/haul
+                if (crouchW > 0.005f && thighL != null && shinL != null && footL != null && thighR != null && shinR != null && footR != null)
+                {
+                    Vector3 poleL = (fwd - rgt * 0.34f).normalized;
+                    Vector3 poleR = (fwd + rgt * 0.34f).normalized;
+                    SolveTwoBoneIKWorld(thighL, shinL, footL, Vector3.Lerp(footL.position, plantedFootL, crouchW), poleL, keepTipLocalRotation: false, animHintWeight: 0.42f);
+                    SolveTwoBoneIKWorld(thighR, shinR, footR, Vector3.Lerp(footR.position, plantedFootR, crouchW), poleR, keepTipLocalRotation: false, animHintWeight: 0.42f);
+                }
+
+                // 4. Right arm reaching down/back within true arm reach (~6.0m) to grip Slattern's skull low behind hip
                 if (ikGripHead && upperArmR != null && forearmR != null && handR != null)
                 {
-                    Vector3 fwd = jaegerTransform.forward;
-                    Vector3 rgt = jaegerTransform.right;
-                    gripWorldTarget = jaegerTransform.position + rgt * 2.75f - fwd * 2.5f + Vector3.up * 7.8f;
-                    Vector3 elbowPole = (-fwd * 0.55f + rgt * 0.8f + Vector3.up * 0.35f).normalized;
-                    SolveTwoBoneIKWorld(upperArmR, forearmR, handR, gripWorldTarget, elbowPole);
+                    Vector3 anchorOffset = -up * 5.25f - fwd * 2.85f + rgt * 0.55f;
+                    gripWorldTarget = upperArmR.position + anchorOffset;
+                    Vector3 ikTarget = gripWorldTarget;
+                    if (slatternRagdoll != null)
+                    {
+                        Vector3 skullPos = slatternRagdoll.SkullGripWorldPos;
+                        Vector3 delta = skullPos - upperArmR.position;
+                        if (delta.magnitude > 6.45f) delta = delta.normalized * 6.45f;
+                        ikTarget = Vector3.Lerp(gripWorldTarget, upperArmR.position + delta, 0.72f);
+                    }
+                    Vector3 elbowPole = (-fwd * 0.45f + rgt * 0.85f + up * 0.25f).normalized;
+                    SolveTwoBoneIKWorld(upperArmR, forearmR, handR, ikTarget, elbowPole, keepTipLocalRotation: true, animHintWeight: 0.15f);
                 }
 
-                // Heave pose swinging Slattern forward over the Breach rim
+                // 5. Heavy outer-right heave follow-through swinging Slattern cleanly past Gipsy's right flank (no crossing body)
                 if (ikHeaveForward && heaveAnimWeight > 0.01f && upperArmR != null && forearmR != null && handR != null)
                 {
-                    Vector3 fwd = jaegerTransform.forward;
-                    Vector3 rgt = jaegerTransform.right;
-                    Vector3 throwTarget = jaegerTransform.position + fwd * Mathf.Lerp(-2.5f, 8.2f, heaveForwardT) + rgt * Mathf.Lerp(3.2f, 0.8f, heaveForwardT) + Vector3.up * Mathf.Lerp(7.8f, 17.5f, heaveForwardT);
-                    Vector3 poleR = (rgt + Vector3.down * 0.3f).normalized;
-                    SolveTwoBoneIKWorld(upperArmR, forearmR, handR, Vector3.Lerp(handR.position, throwTarget, heaveAnimWeight), poleR);
+                    Vector3 throwTarget = upperArmR.position
+                        + fwd * Mathf.Lerp(-2.6f, 5.2f, heaveForwardT)
+                        + rgt * (2.2f + Mathf.Sin(heaveForwardT * Mathf.PI) * 1.8f)
+                        + up * Mathf.Lerp(-4.5f, 2.4f, heaveForwardT);
+                    Vector3 poleR = (rgt * 0.92f - up * 0.25f).normalized;
+                    SolveTwoBoneIKWorld(upperArmR, forearmR, handR, Vector3.Lerp(handR.position, throwTarget, heaveAnimWeight), poleR, keepTipLocalRotation: true, animHintWeight: 0.15f);
                 }
 
-                // Headfirst dive pose (0:08.7 - 0:11)
+                // 6. Heavy braced left-arm counterweight during drag & crouch (prevents casual walk arm swing)
+                if (braceLeftArmWeight > 0.01f && jaegerDiveBlend < 0.05f && upperArmL != null && forearmL != null && handL != null)
+                {
+                    Vector3 braceL = upperArmL.position + (-rgt * 1.45f + fwd * 2.15f - up * 4.35f);
+                    Vector3 poleL = (-fwd * 0.55f - rgt * 0.80f - up * 0.15f).normalized;
+                    SolveTwoBoneIKWorld(upperArmL, forearmL, handL, Vector3.Lerp(handL.position, braceL, braceLeftArmWeight), poleL, keepTipLocalRotation: true, animHintWeight: 0.2f);
+                }
+
+                // 7. Upright Jumping IK Animation (heavy staggered jump knees + chest-guard arms, ZERO root rotation)
                 if (jaegerDiveBlend > 0.01f)
                 {
-                    Vector3 fwd = jaegerTransform.forward;
-                    Vector3 up = jaegerTransform.up;
-                    Vector3 rgt = jaegerTransform.right;
+                    float dw = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(jaegerDiveBlend));
+                    float rushDrift = Mathf.Sin(jaegerPlungeTime * 4.2f) * 0.35f;
+
+                    if (spine1Bone != null)
+                        spine1Bone.rotation = Quaternion.AngleAxis(6f * dw, rgt) * spine1Bone.rotation;
+                    if (chestBone != null)
+                        chestBone.rotation = Quaternion.AngleAxis(5f * dw, rgt) * chestBone.rotation;
+                    if (headBone != null)
+                        headBone.rotation = Quaternion.AngleAxis(-14f * dw, rgt) * headBone.rotation;
+
                     if (upperArmL != null && forearmL != null && handL != null)
                     {
-                        Vector3 diveArmL = handL.parent.position + (up * 4.5f - rgt * 1.4f - fwd * 1.2f);
-                        SolveTwoBoneIKWorld(upperArmL, forearmL, handL, Vector3.Lerp(handL.position, diveArmL, jaegerDiveBlend), -fwd);
+                        Vector3 jumpArmL = upperArmL.position + (-up * 3.15f + fwd * 2.55f - rgt * 2.35f + up * rushDrift * 0.45f);
+                        Vector3 armPoleL = (-rgt * 0.78f - fwd * 0.55f - up * 0.25f).normalized;
+                        SolveTwoBoneIKWorld(upperArmL, forearmL, handL, Vector3.Lerp(handL.position, jumpArmL, dw), armPoleL, keepTipLocalRotation: true, animHintWeight: 0.15f);
                     }
                     if (upperArmR != null && forearmR != null && handR != null)
                     {
-                        Vector3 diveArmR = handR.parent.position + (up * 4.5f + rgt * 1.4f - fwd * 1.2f);
-                        SolveTwoBoneIKWorld(upperArmR, forearmR, handR, Vector3.Lerp(handR.position, diveArmR, jaegerDiveBlend), -fwd);
+                        Vector3 jumpArmR = upperArmR.position + (-up * 3.55f + fwd * 1.85f + rgt * 2.45f - up * rushDrift * 0.45f);
+                        Vector3 armPoleR = (rgt * 0.78f - fwd * 0.55f - up * 0.25f).normalized;
+                        SolveTwoBoneIKWorld(upperArmR, forearmR, handR, Vector3.Lerp(handR.position, jumpArmR, dw), armPoleR, keepTipLocalRotation: true, animHintWeight: 0.15f);
+                    }
+
+                    if (thighL != null && shinL != null && footL != null)
+                    {
+                        Vector3 jumpFootL = thighL.position + (-up * 7.25f + fwd * 2.35f - rgt * 0.48f + up * rushDrift * 0.55f);
+                        Vector3 legPoleL = (fwd * 0.95f - rgt * 0.25f).normalized;
+                        SolveTwoBoneIKWorld(thighL, shinL, footL, Vector3.Lerp(footL.position, jumpFootL, dw), legPoleL, keepTipLocalRotation: true, animHintWeight: 0.15f);
+                    }
+                    if (thighR != null && shinR != null && footR != null)
+                    {
+                        Vector3 jumpFootR = thighR.position + (-up * 9.55f - fwd * 1.15f + rgt * 0.48f - up * rushDrift * 0.55f);
+                        Vector3 legPoleR = (fwd * 0.88f + rgt * 0.28f).normalized;
+                        SolveTwoBoneIKWorld(thighR, shinR, footR, Vector3.Lerp(footR.position, jumpFootR, dw), legPoleR, keepTipLocalRotation: true, animHintWeight: 0.15f);
                     }
                 }
 
-                // Lift & align Slattern's upper torso/neck/skull cleanly into Gipsy's gripping right hand
-                if (headAttachedToGrip && slatternHeadNeckChain.Count >= 2)
+                // 8. Curl Gipsy's right fist around Slattern's skull (and left fist during braced crouch/plunge)
+                if (gripRightFistWeight > 0.01f)
+                {
+                    ApplyHandFistCurl(isRightHand: true, gripRightFistWeight);
+                }
+                if (braceLeftArmWeight > 0.01f || jaegerDiveBlend > 0.01f)
+                {
+                    ApplyHandFistCurl(isRightHand: false, Mathf.Max(braceLeftArmWeight, jaegerDiveBlend) * 0.85f);
+                }
+
+                // 9. Sync Slattern's articulated PhysX ragdoll bodies back onto the skinned skeleton
+                if (useRagdollPhysics && slatternRagdoll != null)
+                {
+                    slatternRagdoll.SyncToSkeleton();
+                }
+                else if (headAttachedToGrip && slatternHeadNeckChain.Count >= 2)
                 {
                     AlignHeadNeckChainToTarget(gripWorldTarget);
                 }
@@ -1252,9 +1770,44 @@ namespace PacificRimCutscene
 
             if (lockCameraInLateUpdate && mainCamera != null)
             {
-                mainCamera.transform.SetPositionAndRotation(camTargetPos, camTargetRot);
+                Vector3 shakePos = cameraShake != null ? cameraShake.CurrentOffset : Vector3.zero;
+                Vector3 shakeRot = cameraShake != null ? cameraShake.CurrentRotationOffset : Vector3.zero;
+                mainCamera.transform.SetPositionAndRotation(camTargetPos + camTargetRot * shakePos, camTargetRot * Quaternion.Euler(shakeRot));
                 mainCamera.fieldOfView = camTargetFov;
             }
+        }
+
+        private void ApplyHandFistCurl(bool isRightHand, float weight)
+        {
+            float w = Mathf.Clamp01(weight);
+            float sign = isRightHand ? -1f : 1f; // Hand.R curls inward with -Z; Hand.L curls inward with +Z
+            Quaternion p1 = Quaternion.Euler(0f, 0f, 48f * sign);
+            Quaternion p2 = Quaternion.Euler(0f, 0f, 62f * sign);
+            Quaternion p3 = Quaternion.Euler(0f, 0f, 48f * sign);
+
+            if (isRightHand)
+            {
+                BlendFingerChain(indexR1, indexR2, indexR3, p1, p2, p3, w);
+                BlendFingerChain(middleR1, middleR2, middleR3, p1, p2, p3, w);
+                BlendFingerChain(ringR1, ringR2, ringR3, p1, p2, p3, w);
+                BlendFingerChain(pinkyR1, pinkyR2, pinkyR3, p1, p2, p3, w);
+                BlendFingerChain(thumbR1, thumbR2, null, Quaternion.Euler(28f, -18f, -38f), Quaternion.Euler(0f, 0f, -36f), Quaternion.identity, w);
+            }
+            else
+            {
+                BlendFingerChain(indexL1, indexL2, indexL3, p1, p2, p3, w);
+                BlendFingerChain(middleL1, middleL2, middleL3, p1, p2, p3, w);
+                BlendFingerChain(ringL1, ringL2, ringL3, p1, p2, p3, w);
+                BlendFingerChain(pinkyL1, pinkyL2, pinkyL3, p1, p2, p3, w);
+                BlendFingerChain(thumbL1, thumbL2, null, Quaternion.Euler(28f, 18f, 38f), Quaternion.Euler(0f, 0f, 36f), Quaternion.identity, w);
+            }
+        }
+
+        private static void BlendFingerChain(Transform b1, Transform b2, Transform b3, Quaternion r1, Quaternion r2, Quaternion r3, float w)
+        {
+            if (b1 != null) b1.localRotation = Quaternion.Slerp(b1.localRotation, r1, w);
+            if (b2 != null) b2.localRotation = Quaternion.Slerp(b2.localRotation, r2, w);
+            if (b3 != null) b3.localRotation = Quaternion.Slerp(b3.localRotation, r3, w);
         }
 
         private void AlignHeadNeckChainToTarget(Vector3 targetWorldPos)
@@ -1295,6 +1848,12 @@ namespace PacificRimCutscene
             isCutsceneRunning = false;
             applyLateUpdatePoses = false;
             lockCameraInLateUpdate = false;
+            useRagdollPhysics = false;
+            if (slatternRagdoll != null)
+            {
+                slatternRagdoll.Dispose();
+                slatternRagdoll = null;
+            }
 
             AnteverseEndingCutscene.HandoffFromOperationPitfall = true;
             AnteverseEndingCutscene.RecordedCombatTime = recordedCombatTime;
@@ -1314,6 +1873,12 @@ namespace PacificRimCutscene
             isCutsceneRunning = false;
             applyLateUpdatePoses = false;
             lockCameraInLateUpdate = false;
+            useRagdollPhysics = false;
+            if (slatternRagdoll != null)
+            {
+                slatternRagdoll.Dispose();
+                slatternRagdoll = null;
+            }
 
             StopEndingAudio();
             PacificRimMusicManager.Instance?.StopMusicImmediate();
@@ -1587,12 +2152,15 @@ namespace PacificRimCutscene
             return inv * inv * p0 + 2f * inv * t * p1 + t * t * p2;
         }
 
-        private static void SolveTwoBoneIKWorld(Transform root, Transform mid, Transform tip, Vector3 targetPos, Vector3 poleForward)
+        private static void SolveTwoBoneIKWorld(
+            Transform root, Transform mid, Transform tip, Vector3 targetPos, Vector3 poleForward,
+            bool keepTipLocalRotation = false, float animHintWeight = 0.35f)
         {
             Vector3 a = root.position;
             Vector3 b = mid.position;
             Vector3 c = tip.position;
             Quaternion origTipRot = tip.rotation;
+            Quaternion origTipLocalRot = tip.localRotation;
 
             float l1 = Vector3.Distance(a, b);
             float l2 = Vector3.Distance(b, c);
@@ -1604,10 +2172,12 @@ namespace PacificRimCutscene
             Vector3 dir = dist > 0.0001f ? (toTarget / dist) : Vector3.down;
             Vector3 clampedTarget = a + dir * clampedDist;
 
+            float hw = Mathf.Clamp01(animHintWeight);
             Vector3 animMidProj = a + Vector3.Project(b - a, dir);
             Vector3 poleProj = Vector3.ProjectOnPlane(poleForward, dir);
             Vector3 poleUnit = poleProj.sqrMagnitude > 0.0001f ? poleProj.normalized : dir;
-            Vector3 bendDir = Vector3.ProjectOnPlane((b - animMidProj) * 0.35f + poleUnit * (l1 * 0.65f), dir);
+            Vector3 bendDir = Vector3.ProjectOnPlane((b - animMidProj) * hw + poleUnit * (l1 * (1f - hw)), dir);
+            if (bendDir.sqrMagnitude < 0.0001f) bendDir = poleProj;
             if (bendDir.sqrMagnitude < 0.0001f) return;
             bendDir.Normalize();
 
@@ -1631,7 +2201,8 @@ namespace PacificRimCutscene
             {
                 mid.rotation = Quaternion.FromToRotation(curMidToTip, newMidToTip) * mid.rotation;
             }
-            tip.rotation = origTipRot;
+            if (keepTipLocalRotation) tip.localRotation = origTipLocalRot;
+            else tip.rotation = origTipRot;
         }
 
         private static bool WasSkipPressed()
@@ -1662,6 +2233,479 @@ namespace PacificRimCutscene
             }
             catch { }
             return false;
+        }
+
+        /// <summary>
+        /// 1:1 world-scale articulated PhysX ragdoll proxy for Category V Slattern.
+        /// Bypasses the 2567x FBX Armature scale cleanly by simulating unscaled meter-scale rigidbodies,
+        /// colliders, and projection-locked ConfigurableJoints, then syncing bone transforms in LateUpdate.
+        /// </summary>
+        private sealed class SlatternCutsceneRagdoll
+        {
+            private sealed class RagdollNode
+            {
+                public Transform bone;
+                public GameObject proxyGo;
+                public Rigidbody rb;
+                public Collider col;
+            }
+
+            private sealed class RigidFollowBone
+            {
+                public Transform bone;
+                public Transform leaderBone;
+                public Vector3 relOffsetInLeaderFrame;
+                public Quaternion relRotToLeader;
+            }
+
+            private readonly GameObject rootGo;
+            private readonly TerrainCollider terrainCollider;
+            private readonly List<RagdollNode> nodes = new List<RagdollNode>();
+            private readonly List<RigidFollowBone> rigidFollowers = new List<RigidFollowBone>();
+            private readonly Dictionary<string, Transform> boneMap = new Dictionary<string, Transform>();
+
+            private RagdollNode lowerTorsoNode;
+            private RagdollNode middleTorsoNode;
+            private RagdollNode upperTorsoNode;
+            private RagdollNode neckNode;
+            private RagdollNode upperHeadNode;
+            private RagdollNode tailCenterNode;
+
+            private Transform lowerHeadBone;
+            private Quaternion lowerHeadRelToUpperHead = Quaternion.identity;
+
+            private Vector3 skullGripLocalOffset = Vector3.zero;
+            private GameObject gripAnchorGo;
+            private Rigidbody gripAnchorRb;
+            private ConfigurableJoint gripJoint;
+
+            private GameObject jaegerShieldGo;
+            private Rigidbody jaegerShieldRb;
+            private CapsuleCollider jaegerShieldCol;
+
+            private bool isReleasedIntoBreach = false;
+            private Vector3 breachCoreTarget;
+
+            public Vector3 SkullGripWorldPos => upperHeadNode != null
+                ? upperHeadNode.proxyGo.transform.TransformPoint(skullGripLocalOffset)
+                : Vector3.zero;
+
+            public Vector3 HeadWorldPos => upperHeadNode != null ? upperHeadNode.proxyGo.transform.position : Vector3.zero;
+            public Vector3 TorsoWorldCenter => upperTorsoNode != null ? upperTorsoNode.proxyGo.transform.position : Vector3.zero;
+            public Vector3 TailWorldCenter => tailCenterNode != null ? tailCenterNode.proxyGo.transform.position : Vector3.zero;
+
+            public SlatternCutsceneRagdoll(Transform slatternTransform, TerrainCollider terrainCol)
+            {
+                terrainCollider = terrainCol;
+                rootGo = new GameObject("_SlatternCutsceneRagdoll");
+
+                foreach (var t in slatternTransform.GetComponentsInChildren<Transform>(true))
+                {
+                    if (!boneMap.ContainsKey(t.name)) boneMap[t.name] = t;
+                }
+
+                var dragPhysMat = new PhysicsMaterial("SlatternDragPhysMat")
+                {
+                    dynamicFriction = 0.52f,
+                    staticFriction = 0.58f,
+                    bounciness = 0f,
+                    frictionCombine = PhysicsMaterialCombine.Average,
+                    bounceCombine = PhysicsMaterialCombine.Minimum
+                };
+
+                // Core spine & skull
+                lowerTorsoNode = CreateNode("LowerTorso", "MiddleTorso", 850f, 2.35f, dragPhysMat);
+                middleTorsoNode = CreateJointedNode("MiddleTorso", lowerTorsoNode, "UpperTorso", 620f, 2.45f, 24f, 20f, 16f, 65f, 450f, dragPhysMat);
+                upperTorsoNode = CreateJointedNode("UpperTorso", middleTorsoNode, "Neck", 720f, 2.60f, 24f, 22f, 18f, 65f, 480f, dragPhysMat);
+                neckNode = CreateJointedNode("Neck", upperTorsoNode, "UpperHead", 210f, 1.50f, 36f, 32f, 25f, 22f, 220f, dragPhysMat);
+                upperHeadNode = CreateJointedNode("UpperHead", neckNode, "UpperHead_end", 240f, 1.75f, 42f, 36f, 28f, 16f, 180f, dragPhysMat);
+
+                if (upperHeadNode != null && boneMap.TryGetValue("UpperHead_end", out var headEnd))
+                {
+                    skullGripLocalOffset = upperHeadNode.proxyGo.transform.InverseTransformPoint(headEnd.position) * 0.44f;
+                }
+                if (upperHeadNode != null && boneMap.TryGetValue("LowerHead", out lowerHeadBone))
+                {
+                    lowerHeadRelToUpperHead = Quaternion.Inverse(upperHeadNode.bone.rotation) * lowerHeadBone.rotation;
+                }
+
+                // Sibling pelvic/shoulder/tail roots that sit outside parent bone chain in FBX
+                RegisterRigidFollower("Bone.024", lowerTorsoNode?.bone);
+                RegisterRigidFollower("Pelvis.L", lowerTorsoNode?.bone);
+                RegisterRigidFollower("Pelvis.R", lowerTorsoNode?.bone);
+                RegisterRigidFollower("Shoulder.L", upperTorsoNode?.bone);
+                RegisterRigidFollower("Shoulder.R", upperTorsoNode?.bone);
+
+                // Arms (connected to UpperTorso)
+                var uArmL = CreateJointedNode("UpperArm.L", upperTorsoNode, "LowerArm.L", 150f, 1.45f, 62f, 52f, 40f, 12f, 130f, dragPhysMat);
+                CreateJointedNode("LowerArm.L", uArmL, "Wrist.L", 120f, 1.25f, 68f, 32f, 26f, 8f, 110f, dragPhysMat);
+                var uArmR = CreateJointedNode("UpperArm.R", upperTorsoNode, "LowerArm.R", 150f, 1.45f, 62f, 52f, 40f, 12f, 130f, dragPhysMat);
+                CreateJointedNode("LowerArm.R", uArmR, "Wrist.R", 120f, 1.25f, 68f, 32f, 26f, 8f, 110f, dragPhysMat);
+
+                // Legs (connected to LowerTorso)
+                var uLegL = CreateJointedNode("UpperLeg.L", lowerTorsoNode, "LowerLeg.L", 190f, 1.60f, 58f, 42f, 32f, 15f, 150f, dragPhysMat);
+                var lLegL = CreateJointedNode("LowerLeg.L", uLegL, "Ankle.L", 145f, 1.35f, 68f, 28f, 22f, 10f, 120f, dragPhysMat);
+                CreateJointedNode("Ankle.L", lLegL, "Foot.L_end", 95f, 1.15f, 48f, 24f, 20f, 8f, 85f, dragPhysMat);
+
+                var uLegR = CreateJointedNode("UpperLeg.R", lowerTorsoNode, "LowerLeg.R", 190f, 1.60f, 58f, 42f, 32f, 15f, 150f, dragPhysMat);
+                var lLegR = CreateJointedNode("LowerLeg.R", uLegR, "Ankle.R", 145f, 1.35f, 68f, 28f, 22f, 10f, 120f, dragPhysMat);
+                CreateJointedNode("Ankle.R", lLegR, "Foot.R_end", 95f, 1.15f, 48f, 24f, 20f, 8f, 85f, dragPhysMat);
+
+                // Triple Tails (connected to LowerTorso via Bone.025)
+                var tailRoot = CreateJointedNode("Bone.025", lowerTorsoNode, "TailBone", 140f, 1.40f, 40f, 36f, 22f, 18f, 130f, dragPhysMat);
+                var tc1 = CreateJointedNode("TailBone", tailRoot, "TailBone.002", 95f, 1.10f, 44f, 44f, 25f, 10f, 95f, dragPhysMat);
+                var tc2 = CreateJointedNode("TailBone.002", tc1, "TailBone.001", 80f, 0.95f, 46f, 46f, 25f, 8f, 80f, dragPhysMat);
+                tailCenterNode = tc2 ?? tc1;
+                var tc3 = CreateJointedNode("TailBone.001", tc2, "TailBone.003", 65f, 0.85f, 48f, 48f, 25f, 6f, 65f, dragPhysMat);
+                CreateJointedNode("TailBone.003", tc3, "TailBone.004_end", 50f, 0.72f, 48f, 48f, 25f, 5f, 55f, dragPhysMat);
+
+                var tl1 = CreateJointedNode("TailBone.L", tailRoot, "TailBone.L.001", 85f, 1.00f, 44f, 44f, 25f, 10f, 85f, dragPhysMat);
+                var tl2 = CreateJointedNode("TailBone.L.001", tl1, "TailBone.L.002", 70f, 0.85f, 46f, 46f, 25f, 8f, 70f, dragPhysMat);
+                CreateJointedNode("TailBone.L.002", tl2, "TailBone.L.004_end", 55f, 0.72f, 48f, 48f, 25f, 5f, 55f, dragPhysMat);
+
+                var tr1 = CreateJointedNode("TailBone.R", tailRoot, "TailBone.R.001", 85f, 1.00f, 44f, 44f, 25f, 10f, 85f, dragPhysMat);
+                var tr2 = CreateJointedNode("TailBone.R.001", tr1, "TailBone.R.002", 70f, 0.85f, 46f, 46f, 25f, 8f, 70f, dragPhysMat);
+                CreateJointedNode("TailBone.R.002", tr2, "TailBone.R.004_end", 55f, 0.72f, 48f, 48f, 25f, 5f, 55f, dragPhysMat);
+
+                // Ignore all internal self-collisions and non-Terrain scene colliders so only seabed TerrainCollider acts on limbs
+                var allSceneColliders = FindObjectsByType<Collider>(FindObjectsInactive.Include);
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    var ci = nodes[i].col;
+                    if (ci == null) continue;
+                    for (int j = i + 1; j < nodes.Count; j++)
+                    {
+                        if (nodes[j].col != null) Physics.IgnoreCollision(ci, nodes[j].col, true);
+                    }
+                    for (int k = 0; k < allSceneColliders.Length; k++)
+                    {
+                        var sc = allSceneColliders[k];
+                        if (sc == null || sc == terrainCollider) continue;
+                        bool isOwn = false;
+                        for (int m = 0; m < nodes.Count; m++)
+                        {
+                            if (nodes[m].col == sc) { isOwn = true; break; }
+                        }
+                        if (!isOwn) Physics.IgnoreCollision(ci, sc, true);
+                    }
+                }
+            }
+
+            private void RegisterRigidFollower(string followerName, Transform leaderBone)
+            {
+                if (leaderBone == null || !boneMap.TryGetValue(followerName, out var fBone)) return;
+                rigidFollowers.Add(new RigidFollowBone
+                {
+                    bone = fBone,
+                    leaderBone = leaderBone,
+                    relOffsetInLeaderFrame = Quaternion.Inverse(leaderBone.rotation) * (fBone.position - leaderBone.position),
+                    relRotToLeader = Quaternion.Inverse(leaderBone.rotation) * fBone.rotation
+                });
+            }
+
+            private RagdollNode CreateNode(string boneName, string tipName, float mass, float radius, PhysicsMaterial physMat)
+            {
+                if (!boneMap.TryGetValue(boneName, out var bone)) return null;
+                var proxyGo = new GameObject($"Proxy_{boneName}");
+                proxyGo.transform.SetParent(rootGo.transform, true);
+                proxyGo.transform.SetPositionAndRotation(bone.position, bone.rotation);
+                proxyGo.transform.localScale = Vector3.one;
+
+                var rb = proxyGo.AddComponent<Rigidbody>();
+                rb.mass = mass;
+                rb.linearDamping = 1.65f;
+                rb.angularDamping = 3.20f;
+                rb.useGravity = false; // We apply calibrated underwater gravity & Breach suction manually
+                rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                rb.solverIterations = 16;
+                rb.solverVelocityIterations = 6;
+
+                Collider col = null;
+                if (!string.IsNullOrEmpty(tipName) && boneMap.TryGetValue(tipName, out var tip))
+                {
+                    Vector3 localTip = proxyGo.transform.InverseTransformPoint(tip.position);
+                    float len = localTip.magnitude;
+                    if (len > 0.25f)
+                    {
+                        var colGo = new GameObject("Col");
+                        colGo.transform.SetParent(proxyGo.transform, false);
+                        colGo.transform.localPosition = localTip * 0.5f;
+                        colGo.transform.localRotation = Quaternion.FromToRotation(Vector3.up, localTip.normalized);
+                        var cap = colGo.AddComponent<CapsuleCollider>();
+                        cap.direction = 1;
+                        cap.radius = radius;
+                        cap.height = Mathf.Max(radius * 2.1f, len + radius * 0.45f);
+                        cap.sharedMaterial = physMat;
+                        col = cap;
+                    }
+                }
+                if (col == null)
+                {
+                    var sph = proxyGo.AddComponent<SphereCollider>();
+                    sph.radius = radius;
+                    sph.sharedMaterial = physMat;
+                    col = sph;
+                }
+
+                var node = new RagdollNode { bone = bone, proxyGo = proxyGo, rb = rb, col = col };
+                nodes.Add(node);
+                return node;
+            }
+
+            private RagdollNode CreateJointedNode(
+                string boneName, RagdollNode parentNode, string tipName,
+                float mass, float radius, float swingX, float swingY, float twistZ,
+                float spring, float damper, PhysicsMaterial physMat)
+            {
+                var node = CreateNode(boneName, tipName, mass, radius, physMat);
+                if (node == null || parentNode == null) return node;
+
+                var joint = node.proxyGo.AddComponent<ConfigurableJoint>();
+                joint.connectedBody = parentNode.rb;
+                joint.autoConfigureConnectedAnchor = false;
+                joint.anchor = Vector3.zero;
+                joint.connectedAnchor = parentNode.proxyGo.transform.InverseTransformPoint(node.proxyGo.transform.position);
+                joint.xMotion = ConfigurableJointMotion.Locked;
+                joint.yMotion = ConfigurableJointMotion.Locked;
+                joint.zMotion = ConfigurableJointMotion.Locked;
+                joint.angularXMotion = ConfigurableJointMotion.Limited;
+                joint.angularYMotion = ConfigurableJointMotion.Limited;
+                joint.angularZMotion = ConfigurableJointMotion.Limited;
+                joint.lowAngularXLimit = new SoftJointLimit { limit = -swingX };
+                joint.highAngularXLimit = new SoftJointLimit { limit = swingX };
+                joint.angularYLimit = new SoftJointLimit { limit = swingY };
+                joint.angularZLimit = new SoftJointLimit { limit = twistZ };
+                joint.rotationDriveMode = RotationDriveMode.Slerp;
+                joint.slerpDrive = new JointDrive { positionSpring = spring, positionDamper = damper, maximumForce = float.MaxValue };
+                joint.projectionMode = JointProjectionMode.PositionAndRotation;
+                joint.projectionDistance = 0.04f;
+                joint.projectionAngle = 4f;
+                joint.enableCollision = false;
+                joint.enablePreprocessing = false;
+                return node;
+            }
+
+            public void AttachGripToSkull(Vector3 worldPos)
+            {
+                if (upperHeadNode == null) return;
+                gripAnchorGo = new GameObject("Slattern_SkullGripAnchor");
+                gripAnchorGo.transform.SetParent(rootGo.transform, true);
+                gripAnchorGo.transform.position = worldPos;
+                gripAnchorRb = gripAnchorGo.AddComponent<Rigidbody>();
+                gripAnchorRb.isKinematic = true;
+                gripAnchorRb.useGravity = false;
+
+                gripJoint = upperHeadNode.proxyGo.AddComponent<ConfigurableJoint>();
+                gripJoint.connectedBody = gripAnchorRb;
+                gripJoint.autoConfigureConnectedAnchor = false;
+                gripJoint.anchor = skullGripLocalOffset;
+                gripJoint.connectedAnchor = Vector3.zero;
+                gripJoint.xMotion = ConfigurableJointMotion.Locked;
+                gripJoint.yMotion = ConfigurableJointMotion.Locked;
+                gripJoint.zMotion = ConfigurableJointMotion.Locked;
+                gripJoint.angularXMotion = ConfigurableJointMotion.Free;
+                gripJoint.angularYMotion = ConfigurableJointMotion.Free;
+                gripJoint.angularZMotion = ConfigurableJointMotion.Free;
+                gripJoint.rotationDriveMode = RotationDriveMode.Slerp;
+                gripJoint.slerpDrive = new JointDrive { positionSpring = 0f, positionDamper = 180f, maximumForce = float.MaxValue };
+                gripJoint.projectionMode = JointProjectionMode.PositionAndRotation;
+                gripJoint.projectionDistance = 0.05f;
+                gripJoint.projectionAngle = 180f;
+                gripJoint.enableCollision = false;
+            }
+
+            public void MoveGripAnchor(Vector3 targetWorldPos)
+            {
+                if (gripAnchorRb != null)
+                {
+                    gripAnchorRb.MovePosition(targetWorldPos);
+                }
+            }
+
+            public void UpdateJaegerShield(Vector3 jaegerRootWorldPos, float radius, bool active)
+            {
+                if (!active)
+                {
+                    if (jaegerShieldCol != null) jaegerShieldCol.enabled = false;
+                    return;
+                }
+                if (jaegerShieldGo == null)
+                {
+                    jaegerShieldGo = new GameObject("__JaegerBodyShield");
+                    jaegerShieldGo.transform.SetParent(rootGo.transform, true);
+                    jaegerShieldGo.transform.position = jaegerRootWorldPos + Vector3.up * 10.5f;
+                    jaegerShieldRb = jaegerShieldGo.AddComponent<Rigidbody>();
+                    jaegerShieldRb.isKinematic = true;
+                    jaegerShieldRb.useGravity = false;
+                    jaegerShieldCol = jaegerShieldGo.AddComponent<CapsuleCollider>();
+                    jaegerShieldCol.direction = 1;
+                    jaegerShieldCol.height = 24f;
+                    jaegerShieldCol.radius = radius;
+                    if (terrainCollider != null)
+                    {
+                        Physics.IgnoreCollision(jaegerShieldCol, terrainCollider, true);
+                    }
+                }
+                jaegerShieldCol.enabled = true;
+                jaegerShieldCol.radius = radius;
+                jaegerShieldRb.MovePosition(jaegerRootWorldPos + Vector3.up * 10.5f);
+            }
+
+            public void ApplyDragDownwardWeight(float gravityAccel)
+            {
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    var rb = nodes[i].rb;
+                    if (rb != null)
+                    {
+                        rb.AddForce(Vector3.down * gravityAccel, ForceMode.Acceleration);
+                    }
+                }
+            }
+
+            public void ApplyHeaveAssist(Vector3 targetVel, float weight)
+            {
+                float w = Mathf.Clamp01(weight);
+                void Guide(RagdollNode n, float strength)
+                {
+                    if (n == null || n.rb == null) return;
+#if UNITY_6000_0_OR_NEWER
+                    Vector3 dv = targetVel - n.rb.linearVelocity;
+#else
+                    Vector3 dv = targetVel - n.rb.velocity;
+#endif
+                    n.rb.AddForce(dv * (strength * w), ForceMode.Acceleration);
+                }
+                Guide(upperTorsoNode, 18f);
+                Guide(middleTorsoNode, 15f);
+                Guide(lowerTorsoNode, 13f);
+                ApplyDragDownwardWeight(12f);
+            }
+
+            public void ReleaseAndThrowIntoBreach(Vector3 throwVelocity, Vector3 tumbleAngularVel, Vector3 breachTarget)
+            {
+                isReleasedIntoBreach = true;
+                breachCoreTarget = breachTarget;
+
+                if (gripJoint != null)
+                {
+                    Destroy(gripJoint);
+                    gripJoint = null;
+                }
+                if (gripAnchorGo != null)
+                {
+                    Destroy(gripAnchorGo);
+                    gripAnchorGo = null;
+                    gripAnchorRb = null;
+                }
+
+                // Bypass flat seabed TerrainCollider inside the Breach so Slattern plunges deep into the rift
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    var n = nodes[i];
+                    if (n.col != null && terrainCollider != null)
+                    {
+                        Physics.IgnoreCollision(n.col, terrainCollider, true);
+                    }
+                    if (n.rb != null)
+                    {
+                        n.rb.linearDamping = 0.42f;
+                        n.rb.angularDamping = 0.90f;
+#if UNITY_6000_0_OR_NEWER
+                        n.rb.linearVelocity = throwVelocity;
+#else
+                        n.rb.velocity = throwVelocity;
+#endif
+                        if (n == lowerTorsoNode || n == middleTorsoNode || n == upperTorsoNode || n == upperHeadNode)
+                        {
+                            n.rb.angularVelocity = tumbleAngularVel;
+                        }
+                    }
+                }
+            }
+
+            public bool HasPiercedBreachPlane(float planeY)
+            {
+                if (!isReleasedIntoBreach) return false;
+                if (upperHeadNode != null && upperHeadNode.proxyGo.transform.position.y <= planeY) return true;
+                if (upperTorsoNode != null && upperTorsoNode.proxyGo.transform.position.y <= planeY) return true;
+                return false;
+            }
+
+            public void StepFreeFallIntoBreach(float dt)
+            {
+                if (!isReleasedIntoBreach) return;
+
+                Vector3 deepTarget = new Vector3(breachCoreTarget.x, -110f, breachCoreTarget.z + 2f);
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    var n = nodes[i];
+                    if (n.rb == null) continue;
+
+                    // Heavy gravity + Breach abyssal suction funneling Slattern deep down below the membrane
+                    Vector3 p = n.proxyGo.transform.position;
+                    float suctionGain = p.z > 94f ? 1f : Mathf.InverseLerp(86f, 96f, p.z);
+                    Vector3 toDeep = new Vector3(deepTarget.x - p.x, 0f, deepTarget.z - p.z);
+                    Vector3 accel = Vector3.down * Mathf.Lerp(26f, 52f, suctionGain) + toDeep * (1.25f * suctionGain);
+                    n.rb.AddForce(accel, ForceMode.Acceleration);
+                }
+            }
+
+            public void SyncToSkeleton()
+            {
+                if (lowerTorsoNode == null) return;
+
+                // Sync root pelvis position & rotation first
+                lowerTorsoNode.bone.SetPositionAndRotation(
+                    lowerTorsoNode.proxyGo.transform.position,
+                    lowerTorsoNode.proxyGo.transform.rotation);
+
+                // Keep sibling pelvis/tail roots glued to LowerTorso in world meters
+                for (int i = 0; i < rigidFollowers.Count; i++)
+                {
+                    var rf = rigidFollowers[i];
+                    if (rf.bone == null || rf.leaderBone == null) continue;
+                    rf.bone.SetPositionAndRotation(
+                        rf.leaderBone.position + (rf.leaderBone.rotation * rf.relOffsetInLeaderFrame),
+                        rf.leaderBone.rotation * rf.relRotToLeader);
+                }
+
+                // Copy world rotations in strict parent-before-child creation order
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    var n = nodes[i];
+                    if (n == lowerTorsoNode || n.bone == null || n.proxyGo == null) continue;
+                    n.bone.rotation = n.proxyGo.transform.rotation;
+
+                    // Refresh Shoulder.L/R after UpperTorso rotates (since Shoulder.L/R are children of MiddleTorso in FBX)
+                    if (n == upperTorsoNode)
+                    {
+                        for (int r = 0; r < rigidFollowers.Count; r++)
+                        {
+                            var rf = rigidFollowers[r];
+                            if (rf.leaderBone == upperTorsoNode.bone && rf.bone != null)
+                            {
+                                rf.bone.SetPositionAndRotation(
+                                    rf.leaderBone.position + (rf.leaderBone.rotation * rf.relOffsetInLeaderFrame),
+                                    rf.leaderBone.rotation * rf.relRotToLeader);
+                            }
+                        }
+                    }
+                }
+
+                // Keep jaw (LowerHead) aligned with slack open droop relative to UpperHead
+                if (lowerHeadBone != null && upperHeadNode != null)
+                {
+                    lowerHeadBone.rotation = upperHeadNode.bone.rotation * lowerHeadRelToUpperHead * Quaternion.Euler(14f, 0f, 0f);
+                }
+            }
+
+            public void Dispose()
+            {
+                if (rootGo != null) Destroy(rootGo);
+                nodes.Clear();
+                rigidFollowers.Clear();
+            }
         }
     }
 }
