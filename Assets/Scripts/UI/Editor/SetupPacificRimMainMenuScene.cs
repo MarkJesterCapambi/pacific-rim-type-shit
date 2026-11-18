@@ -15,6 +15,7 @@ namespace PacificRimUI.Editor
         public const string Level1ScenePath = "Assets/Scenes/Save Striker Eureka.unity";
         public const string Level2ScenePath = "Assets/Scenes/Operation Pitfall.unity";
         public const string Level2CutsceneScenePath = "Assets/Scenes/Operation Pitfall Cutscene.unity";
+        public const string AnteverseScenePath = "Assets/Scenes/The Anteverse.unity";
         public const string GameplayScenePath = Level1ScenePath;
         public const string GameplaySceneName = MainMenuUI.Level1SceneName;
         public const string MainMenuSceneName = "MainMenuScene";
@@ -259,8 +260,12 @@ namespace PacificRimUI.Editor
             {
                 scenes.Add(new EditorBuildSettingsScene(Level2ScenePath, true));
             }
+            if (System.IO.File.Exists(AnteverseScenePath))
+            {
+                scenes.Add(new EditorBuildSettingsScene(AnteverseScenePath, true));
+            }
             EditorBuildSettings.scenes = scenes.ToArray();
-            Debug.Log("[PacificRimUI] Build Settings updated with MainMenuScene, Save Striker Eureka, Operation Pitfall Cutscene, and Operation Pitfall.");
+            Debug.Log("[PacificRimUI] Build Settings updated with MainMenuScene, Save Striker Eureka, Operation Pitfall Cutscene, Operation Pitfall, and The Anteverse.");
         }
 
         public static void ConfigureSampleSceneUI()

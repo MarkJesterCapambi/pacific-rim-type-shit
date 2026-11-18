@@ -317290,7 +317290,7 @@ MonoBehaviour:
   poiseRegenDelay: 2.4
   blockDamageReduction: 0.88
   heavyAttackDamageThreshold: 95
-  phase3DamageMultiplier: 0.25
+  phase3DamageMultiplier: 0.65
   phase3HealAmount: 450
   slatternPhase1ParryChance: 0.1
   slatternPhase2ParryChance: 0.42

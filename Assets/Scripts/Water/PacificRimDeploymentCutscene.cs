@@ -595,6 +595,12 @@ namespace PacificRimCutscene
                 yield return null;
             }
 
+            if (letterboxCanvasGroup != null) letterboxCanvasGroup.alpha = 0f;
+            yield return StartCoroutine(PacificRimMissionBriefingOverlay.ShowSaveStrikerEurekaBriefing());
+            if (letterboxCanvasGroup != null) letterboxCanvasGroup.alpha = 1f;
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+
             ExpandOceanForCutscene();
             ApplyMoodyHarborAtmosphereOverride(enable: true);
             lockCameraInLateUpdate = true;

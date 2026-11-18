@@ -635,7 +635,7 @@ namespace PacificRimUI.Editor
             BuildSectionTitle("SectionHeader", leftCol.transform, -14f, "MARK-III  ·  GIPSY DANGER");
 
             var pageTitle = CreateStyledText("PageTitle", leftCol.transform, PacificRimTextStyle.Display,
-                "PACIFIC RIM", PacificRimUITheme.Text, TextAnchor.UpperLeft, 42, 0, true);
+                "Pacific Rim: Operation Pitfall", PacificRimUITheme.Text, TextAnchor.UpperLeft, 42, 0, true);
             var ptRt = pageTitle.rectTransform;
             ptRt.anchorMin = new Vector2(0f, 1f);
             ptRt.anchorMax = new Vector2(1f, 1f);
@@ -707,7 +707,7 @@ namespace PacificRimUI.Editor
             cardLevel1.SetSelected(true);
 
             var cardLevel2 = CreateFeatureCard("Card_Level2", cardsContainer.transform, 0f, 0f, 96f,
-                "02  ·  MARIANA TRENCH", "OPERATION PITFALL", "Category V Slattern", "SELECT", PacificRimUITheme.TextDim);
+                "02  ·  MARIANA TRENCH", "OPERATION PITFALL", "Solo Mission · Cat V Slattern", "SELECT", PacificRimUITheme.TextDim);
             var le2 = cardLevel2.GetComponent<LayoutElement>() ?? cardLevel2.gameObject.AddComponent<LayoutElement>();
             le2.preferredHeight = 96f;
 

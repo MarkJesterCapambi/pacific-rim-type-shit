@@ -90,7 +90,7 @@ namespace PacificRimWater
         [Range(0f, 0.95f)]
         public float blockDamageReduction = 0.88f;
         public float heavyAttackDamageThreshold = 95f;
-        public float phase3DamageMultiplier = 0.25f;
+        public float phase3DamageMultiplier = 0.65f;
         public float phase3HealAmount = 450f;
 
         [Header("Slattern 3-Phase & Parry Profile")]
@@ -2609,6 +2609,14 @@ namespace PacificRimWater
 
         private IEnumerator VictorySequenceRoutine()
         {
+            if (isSlattern)
+            {
+                // Allow Slattern's death collapse into the trench floor before starting the 38s Breach finale
+                yield return new WaitForSeconds(2.8f);
+                PacificRimCutscene.OperationPitfallEndingCutscene.StartFromSlatternDefeat();
+                yield break;
+            }
+
             // Give time for Leatherback's collapse into the Pacific waves
             yield return new WaitForSeconds(1.2f);
             if (targetJaeger != null && !targetJaeger.IsDead)

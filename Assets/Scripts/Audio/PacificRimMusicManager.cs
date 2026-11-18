@@ -261,7 +261,17 @@ namespace PacificRimAudio
                 nextRefSearchTime = Time.unscaledTime + 0.5f;
             }
 
-            // 1. Check Cutscene State (Level 1 Deployment or Level 2 Operation Pitfall Intro)
+            // 1. Check Cutscene State (Level 1 Deployment, Level 2 Intro, Level 2 Ending, or The Anteverse)
+            bool isAnteverseScene = !string.IsNullOrEmpty(sceneName) &&
+                                    sceneName.IndexOf("Anteverse", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool isEndingCutscene = isAnteverseScene ||
+                                    (OperationPitfallEndingCutscene.Instance != null && OperationPitfallEndingCutscene.Instance.isCutsceneRunning) ||
+                                    (AnteverseEndingCutscene.Instance != null && AnteverseEndingCutscene.Instance.isCutsceneRunning);
+            if (isEndingCutscene)
+            {
+                return;
+            }
+
             if (cachedCutscene != null && cachedCutscene.isCutsceneRunning)
             {
                 if (cachedCutscene.HasTriggeredFoghorn)
@@ -584,6 +594,29 @@ namespace PacificRimAudio
 
             scheduledStartDspTime = startDspTime;
             hasScheduledNext = true;
+        }
+
+        public void StopMusicImmediate()
+        {
+            currentState = MusicState.FadedOut;
+            ClearProgressionQueue();
+            isCrossfading = false;
+            fadingToSilence = false;
+            if (activeDeck != null) { activeDeck.Stop(); activeDeck.volume = 0f; }
+            if (standbyDeck != null) { standbyDeck.Stop(); standbyDeck.volume = 0f; }
+        }
+
+        public void PlayEndingSuspenseMusic(float fadeDuration = 1.0f)
+        {
+            ResolveClips();
+            AudioClip clip = enteringSuspenseClip != null ? enteringSuspenseClip : noSuspenseClip;
+            TransitionToLoopingState(MusicState.CutsceneEnteringSuspense, clip, fadeDuration);
+        }
+
+        public void PlayEndingVictoryTheme(float fadeDuration = 2.0f)
+        {
+            ResolveClips();
+            TransitionToLoopingState(MusicState.MainMenu, mainMenuClip, fadeDuration);
         }
 
         private void ClearProgressionQueue()

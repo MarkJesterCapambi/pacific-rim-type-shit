@@ -859,6 +859,17 @@ namespace PacificRimCutscene
 
             // Wait one frame while loading screen & JaegerVisualSockets finish initializing
             yield return null;
+            while (PacificRimLoadingScreen.Instance != null && PacificRimLoadingScreen.Instance.IsLoading)
+            {
+                yield return null;
+            }
+
+            if (letterboxCanvasGroup != null) letterboxCanvasGroup.alpha = 0f;
+            yield return StartCoroutine(PacificRimMissionBriefingOverlay.ShowOperationPitfallBriefing());
+            if (letterboxCanvasGroup != null) letterboxCanvasGroup.alpha = 1f;
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+
             RefreshFloodlightSockets();
             SetUnderwaterFloodlightVisibility(0f);
 

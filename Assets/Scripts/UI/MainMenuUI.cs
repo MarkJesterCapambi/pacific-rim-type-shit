@@ -207,7 +207,10 @@ namespace PacificRimUI
             {
                 if (!IsAnyModalOpen() && WasConfirmPressedThisFrame())
                 {
-                    OnRestartClicked();
+                    if (isVictorious && !IsOperationPitfallActive())
+                        OnNextLevelClicked();
+                    else
+                        OnRestartClicked();
                 }
                 return;
             }
@@ -366,7 +369,17 @@ namespace PacificRimUI
 
             if (deployButton != null)
             {
-                deployButton.gameObject.SetActive(false);
+                if (!isPitfall)
+                {
+                    deployButton.gameObject.SetActive(true);
+                    deployButton.SetText("NEXT LEVEL");
+                    deployButton.playSuccessOnClick = true;
+                    deployButton.onClick = OnNextLevelClicked;
+                }
+                else
+                {
+                    deployButton.gameObject.SetActive(false);
+                }
             }
             if (restartButton != null)
             {
@@ -444,10 +457,14 @@ namespace PacificRimUI
             {
                 if (!isDefeated && !isVictorious)
                 {
+                    if (deployButton != null)
+                    {
+                        deployButton.onClick = OnDeployClicked;
+                    }
                     bool isPitfall = IsOperationPitfallActive();
                     if (pauseTitleText != null)
                     {
-                        pauseTitleText.text = isMainMenuScene ? "PACIFIC RIM" : "PAUSED";
+                        pauseTitleText.text = isMainMenuScene ? "Pacific Rim: Operation Pitfall" : "PAUSED";
                         pauseTitleText.color = isMainMenuScene ? PacificRimUITheme.Text : PacificRimUITheme.BlueBright;
                     }
                     if (pauseSubtitleText != null)
@@ -580,7 +597,7 @@ namespace PacificRimUI
             if (briefingText != null)
             {
                 briefingText.text = selectedMissionIndex == 1
-                    ? "Descend to the Mariana Trench Breach and eliminate Category V Slattern."
+                    ? "Deploy solo to the Mariana Trench, defeat Cat V Slattern, and seal the Breach."
                     : "Protect paralyzed Striker Eureka from Category IV Leatherback in Hong Kong Bay.";
             }
 
@@ -679,6 +696,13 @@ namespace PacificRimUI
                 audioModal.Open();
                 audioModal.GetComponentInChildren<PacificRimAudioSettingsUI>(true)?.RefreshSliderValues();
             }
+        }
+
+        public void OnNextLevelClicked()
+        {
+            PacificRimUISound.PlaySuccess();
+            Time.timeScale = 1f;
+            PacificRimLoadingScreen.LoadScene(Level2CutsceneSceneName);
         }
 
         public void OnRestartClicked()

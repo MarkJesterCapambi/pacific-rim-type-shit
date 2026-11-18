@@ -159,7 +159,9 @@ namespace PacificRimUI
             StopAllCoroutines();
             if (sectorSubText != null)
             {
-                if (sceneName.IndexOf("Operation Pitfall", StringComparison.OrdinalIgnoreCase) >= 0)
+                if (sceneName.IndexOf("Anteverse", StringComparison.OrdinalIgnoreCase) >= 0)
+                    sectorSubText.text = "SECTOR 09 // THE ANTEVERSE";
+                else if (sceneName.IndexOf("Operation Pitfall", StringComparison.OrdinalIgnoreCase) >= 0)
                     sectorSubText.text = "SECTOR 09 // MARIANA TRENCH";
                 else if (sceneName.IndexOf("Save Striker Eureka", StringComparison.OrdinalIgnoreCase) >= 0)
                     sectorSubText.text = "SECTOR 04 // HONG KONG BAY";

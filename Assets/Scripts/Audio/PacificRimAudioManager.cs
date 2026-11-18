@@ -54,6 +54,7 @@ namespace PacificRimAudio
 
         [Header("Scene Audio Mode")]
         public bool isUnderwaterLevel = false;
+        private bool suppressLoopsForEndingCutscene = false;
 
         private const string SfxVolumePrefKey = "PR_SFXVolume";
         private const float DefaultSfxVolume = 0.55f;
@@ -134,14 +135,42 @@ namespace PacificRimAudio
         {
             bool isCutscene = !string.IsNullOrEmpty(sceneName) &&
                               sceneName.IndexOf("Cutscene", System.StringComparison.OrdinalIgnoreCase) >= 0;
-            isUnderwaterLevel = !isCutscene &&
+            bool isAnteverse = !string.IsNullOrEmpty(sceneName) &&
+                               sceneName.IndexOf("Anteverse", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            isUnderwaterLevel = !isCutscene && !isAnteverse &&
                                 !string.IsNullOrEmpty(sceneName) &&
                                 sceneName.IndexOf("Operation Pitfall", System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (!isAnteverse)
+            {
+                SetEndingCutsceneLoopsSuppressed(false);
+            }
+            else
+            {
+                SetEndingCutsceneLoopsSuppressed(true);
+            }
 
             if (stormAmbienceSource != null)
             {
                 stormAmbienceSource.pitch = isUnderwaterLevel ? 0.62f : 1.0f;
                 stormAmbienceSource.volume = (isUnderwaterLevel ? 0.06f : 0.04f) * sfxVolume;
+            }
+        }
+
+        public void SetEndingCutsceneLoopsSuppressed(bool suppressed)
+        {
+            suppressLoopsForEndingCutscene = suppressed;
+            if (suppressed)
+            {
+                if (stormAmbienceSource != null && stormAmbienceSource.isPlaying) stormAmbienceSource.Stop();
+                if (jaegerTurbineSource != null && jaegerTurbineSource.isPlaying) jaegerTurbineSource.Stop();
+                if (jaegerRocketBurnSource != null && jaegerRocketBurnSource.isPlaying) jaegerRocketBurnSource.Stop();
+                if (kaijuEmpSparksSource != null && kaijuEmpSparksSource.isPlaying) kaijuEmpSparksSource.Stop();
+            }
+            else
+            {
+                StartStormAmbience();
+                StartJaegerTurbine();
             }
         }
 
@@ -702,6 +731,7 @@ namespace PacificRimAudio
         // 9. Continuous Ambient Loops
         private void StartStormAmbience()
         {
+            if (suppressLoopsForEndingCutscene) return;
             if (stormAmbienceSource != null && !stormAmbienceSource.isPlaying)
             {
                 var clip = GetClip("OceanStormAmbience_Loop");
@@ -715,6 +745,7 @@ namespace PacificRimAudio
 
         public void StartJaegerTurbine()
         {
+            if (suppressLoopsForEndingCutscene) return;
             if (jaegerTurbineSource != null && !jaegerTurbineSource.isPlaying)
             {
                 var clip = GetClip("JaegerVortexTurbine_Loop");
@@ -728,6 +759,12 @@ namespace PacificRimAudio
 
         public void UpdateTurbineAudio(float normalizedSpeed)
         {
+            if (suppressLoopsForEndingCutscene)
+            {
+                if (jaegerTurbineSource != null && jaegerTurbineSource.isPlaying)
+                    jaegerTurbineSource.Stop();
+                return;
+            }
             if (jaegerTurbineSource != null)
             {
                 if (!jaegerTurbineSource.isPlaying)
