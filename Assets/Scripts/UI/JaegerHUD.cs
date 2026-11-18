@@ -122,13 +122,18 @@ namespace PacificRimUI
         private Image[] glitchScanBars;
         private readonly StringBuilder glitchStringBuilder = new StringBuilder(32);
 
-        // Admin UI toggle buffer ("hesoyam")
+        // Admin UI toggle & meme command buffer ("hesoyam", "freddy", "america")
         private static int suppressFreeCamFrame = -1;
         public static bool SuppressFreeCamThisFrame => suppressFreeCamFrame == Time.frameCount;
 
         private string cheatInputBuffer = "";
         private int lastCheatCharFrame = -1;
-        private char lastCheatChar = '\0';
+        private uint textInputMaskThisFrame = 0u;
+        private uint legacyInputMaskThisFrame = 0u;
+        private uint keyPollMaskThisFrame = 0u;
+#if ENABLE_INPUT_SYSTEM
+        private Keyboard subscribedKeyboard;
+#endif
 
         private static readonly Color StaminaCyan = new Color(0.28f, 0.88f, 0.96f, 1f);
 
@@ -146,10 +151,7 @@ namespace PacificRimUI
             EnsureCanvasGroup();
             ApplyHudVisibility();
 #if ENABLE_INPUT_SYSTEM
-            if (Keyboard.current != null)
-            {
-                Keyboard.current.onTextInput += OnTextInputReceived;
-            }
+            SubscribeKeyboardTextInput();
 #endif
             ResolveReferences();
             SyncImmediate();
@@ -159,12 +161,32 @@ namespace PacificRimUI
         {
             ClearEmpGlitchEffect();
 #if ENABLE_INPUT_SYSTEM
-            if (Keyboard.current != null)
-            {
-                Keyboard.current.onTextInput -= OnTextInputReceived;
-            }
+            UnsubscribeKeyboardTextInput();
 #endif
         }
+
+#if ENABLE_INPUT_SYSTEM
+        private void SubscribeKeyboardTextInput()
+        {
+            var kb = Keyboard.current;
+            if (subscribedKeyboard == kb) return;
+            UnsubscribeKeyboardTextInput();
+            if (kb != null)
+            {
+                kb.onTextInput += OnTextInputReceived;
+                subscribedKeyboard = kb;
+            }
+        }
+
+        private void UnsubscribeKeyboardTextInput()
+        {
+            if (subscribedKeyboard != null)
+            {
+                subscribedKeyboard.onTextInput -= OnTextInputReceived;
+                subscribedKeyboard = null;
+            }
+        }
+#endif
 
         private void OnDestroy()
         {
@@ -204,6 +226,10 @@ namespace PacificRimUI
 
         public void SetCutsceneHidden(bool hidden)
         {
+            if (!hidden && PacificRimMeme.MemeCommandController.IsAmericaActive)
+            {
+                hidden = true;
+            }
             isCutsceneMode = hidden;
             EnsureCanvasGroup();
             if (hudCanvasGroup != null)
@@ -268,17 +294,28 @@ namespace PacificRimUI
             return false;
         }
 
+        private enum CheatInputSource
+        {
+            TextInput,
+            LegacyString,
+            KeyPoll
+        }
+
 #if ENABLE_INPUT_SYSTEM
         private void OnTextInputReceived(char c)
         {
             if (MainMenuUI.IsMenuOpen) return;
-            AppendCheatChar(c);
+            AppendCheatChar(c, CheatInputSource.TextInput);
         }
 #endif
 
         private void UpdateCheatCodeInput()
         {
             if (MainMenuUI.IsMenuOpen) return;
+
+#if ENABLE_INPUT_SYSTEM
+            SubscribeKeyboardTextInput();
+#endif
 
             // 1. Process legacy Input.inputString if available
             try
@@ -291,7 +328,7 @@ namespace PacificRimUI
                         char c = inputStr[i];
                         if (char.IsLetter(c))
                         {
-                            AppendCheatChar(c);
+                            AppendCheatChar(c, CheatInputSource.LegacyString);
                         }
                     }
                 }
@@ -306,48 +343,65 @@ namespace PacificRimUI
             var kb = Keyboard.current;
             if (kb != null)
             {
-                if (kb.bKey.wasPressedThisFrame) AppendCheatChar('b');
-                else if (kb.aKey.wasPressedThisFrame) AppendCheatChar('a');
-                else if (kb.gKey.wasPressedThisFrame) AppendCheatChar('g');
-                else if (kb.uKey.wasPressedThisFrame) AppendCheatChar('u');
-                else if (kb.vKey.wasPressedThisFrame) AppendCheatChar('v');
-                else if (kb.iKey.wasPressedThisFrame) AppendCheatChar('i');
-                else if (kb.xKey.wasPressedThisFrame) AppendCheatChar('x');
-                else if (kb.cKey.wasPressedThisFrame) AppendCheatChar('c');
-                else if (kb.dKey.wasPressedThisFrame) AppendCheatChar('d');
-                else if (kb.eKey.wasPressedThisFrame) AppendCheatChar('e');
-                else if (kb.fKey.wasPressedThisFrame) AppendCheatChar('f');
-                else if (kb.hKey.wasPressedThisFrame) AppendCheatChar('h');
-                else if (kb.jKey.wasPressedThisFrame) AppendCheatChar('j');
-                else if (kb.kKey.wasPressedThisFrame) AppendCheatChar('k');
-                else if (kb.lKey.wasPressedThisFrame) AppendCheatChar('l');
-                else if (kb.mKey.wasPressedThisFrame) AppendCheatChar('m');
-                else if (kb.nKey.wasPressedThisFrame) AppendCheatChar('n');
-                else if (kb.oKey.wasPressedThisFrame) AppendCheatChar('o');
-                else if (kb.pKey.wasPressedThisFrame) AppendCheatChar('p');
-                else if (kb.qKey.wasPressedThisFrame) AppendCheatChar('q');
-                else if (kb.rKey.wasPressedThisFrame) AppendCheatChar('r');
-                else if (kb.sKey.wasPressedThisFrame) AppendCheatChar('s');
-                else if (kb.tKey.wasPressedThisFrame) AppendCheatChar('t');
-                else if (kb.wKey.wasPressedThisFrame) AppendCheatChar('w');
-                else if (kb.yKey.wasPressedThisFrame) AppendCheatChar('y');
-                else if (kb.zKey.wasPressedThisFrame) AppendCheatChar('z');
+                if (kb.aKey.wasPressedThisFrame) AppendCheatChar('a', CheatInputSource.KeyPoll);
+                if (kb.bKey.wasPressedThisFrame) AppendCheatChar('b', CheatInputSource.KeyPoll);
+                if (kb.cKey.wasPressedThisFrame) AppendCheatChar('c', CheatInputSource.KeyPoll);
+                if (kb.dKey.wasPressedThisFrame) AppendCheatChar('d', CheatInputSource.KeyPoll);
+                if (kb.eKey.wasPressedThisFrame) AppendCheatChar('e', CheatInputSource.KeyPoll);
+                if (kb.fKey.wasPressedThisFrame) AppendCheatChar('f', CheatInputSource.KeyPoll);
+                if (kb.gKey.wasPressedThisFrame) AppendCheatChar('g', CheatInputSource.KeyPoll);
+                if (kb.hKey.wasPressedThisFrame) AppendCheatChar('h', CheatInputSource.KeyPoll);
+                if (kb.iKey.wasPressedThisFrame) AppendCheatChar('i', CheatInputSource.KeyPoll);
+                if (kb.jKey.wasPressedThisFrame) AppendCheatChar('j', CheatInputSource.KeyPoll);
+                if (kb.kKey.wasPressedThisFrame) AppendCheatChar('k', CheatInputSource.KeyPoll);
+                if (kb.lKey.wasPressedThisFrame) AppendCheatChar('l', CheatInputSource.KeyPoll);
+                if (kb.mKey.wasPressedThisFrame) AppendCheatChar('m', CheatInputSource.KeyPoll);
+                if (kb.nKey.wasPressedThisFrame) AppendCheatChar('n', CheatInputSource.KeyPoll);
+                if (kb.oKey.wasPressedThisFrame) AppendCheatChar('o', CheatInputSource.KeyPoll);
+                if (kb.pKey.wasPressedThisFrame) AppendCheatChar('p', CheatInputSource.KeyPoll);
+                if (kb.qKey.wasPressedThisFrame) AppendCheatChar('q', CheatInputSource.KeyPoll);
+                if (kb.rKey.wasPressedThisFrame) AppendCheatChar('r', CheatInputSource.KeyPoll);
+                if (kb.sKey.wasPressedThisFrame) AppendCheatChar('s', CheatInputSource.KeyPoll);
+                if (kb.tKey.wasPressedThisFrame) AppendCheatChar('t', CheatInputSource.KeyPoll);
+                if (kb.uKey.wasPressedThisFrame) AppendCheatChar('u', CheatInputSource.KeyPoll);
+                if (kb.vKey.wasPressedThisFrame) AppendCheatChar('v', CheatInputSource.KeyPoll);
+                if (kb.wKey.wasPressedThisFrame) AppendCheatChar('w', CheatInputSource.KeyPoll);
+                if (kb.xKey.wasPressedThisFrame) AppendCheatChar('x', CheatInputSource.KeyPoll);
+                if (kb.yKey.wasPressedThisFrame) AppendCheatChar('y', CheatInputSource.KeyPoll);
+                if (kb.zKey.wasPressedThisFrame) AppendCheatChar('z', CheatInputSource.KeyPoll);
             }
 #endif
         }
 
-        private void AppendCheatChar(char c)
+        private void AppendCheatChar(char c, CheatInputSource source)
         {
             char lower = char.ToLowerInvariant(c);
-            if (!char.IsLetter(lower)) return;
+            if (lower < 'a' || lower > 'z') return;
 
-            // Deduplicate if multiple input providers fired on the same frame
-            if (Time.frameCount == lastCheatCharFrame && lastCheatChar == lower)
+            if (Time.frameCount != lastCheatCharFrame)
             {
-                return;
+                lastCheatCharFrame = Time.frameCount;
+                textInputMaskThisFrame = 0u;
+                legacyInputMaskThisFrame = 0u;
+                keyPollMaskThisFrame = 0u;
             }
-            lastCheatCharFrame = Time.frameCount;
-            lastCheatChar = lower;
+
+            uint charBit = 1u << (lower - 'a');
+            switch (source)
+            {
+                case CheatInputSource.TextInput:
+                    // onTextInput fires once per actual key event (allows fast same-frame double taps like "dd")
+                    textInputMaskThisFrame |= charBit;
+                    break;
+                case CheatInputSource.LegacyString:
+                    if ((textInputMaskThisFrame & charBit) != 0u) return;
+                    legacyInputMaskThisFrame |= charBit;
+                    break;
+                case CheatInputSource.KeyPoll:
+                    if (((textInputMaskThisFrame | legacyInputMaskThisFrame | keyPollMaskThisFrame) & charBit) != 0u) return;
+                    keyPollMaskThisFrame |= charBit;
+                    break;
+            }
 
             cheatInputBuffer += lower;
             if (cheatInputBuffer.Length > 24)
@@ -355,7 +409,9 @@ namespace PacificRimUI
                 cheatInputBuffer = cheatInputBuffer.Substring(cheatInputBuffer.Length - 24);
             }
 
-            if (cheatInputBuffer.EndsWith("he", System.StringComparison.OrdinalIgnoreCase))
+            if (cheatInputBuffer.EndsWith("he", System.StringComparison.OrdinalIgnoreCase) ||
+                cheatInputBuffer.EndsWith("fre", System.StringComparison.OrdinalIgnoreCase) ||
+                cheatInputBuffer.EndsWith("ame", System.StringComparison.OrdinalIgnoreCase))
             {
                 suppressFreeCamFrame = Time.frameCount;
             }
@@ -364,6 +420,16 @@ namespace PacificRimUI
             {
                 cheatInputBuffer = "";
                 TriggerAdminUIToggle();
+            }
+            else if (cheatInputBuffer.EndsWith("freddy", System.StringComparison.OrdinalIgnoreCase))
+            {
+                cheatInputBuffer = "";
+                PacificRimMeme.MemeCommandController.TriggerFreddyJumpscare();
+            }
+            else if (cheatInputBuffer.EndsWith("america", System.StringComparison.OrdinalIgnoreCase))
+            {
+                cheatInputBuffer = "";
+                PacificRimMeme.MemeCommandController.TriggerAmericaAirstrike();
             }
         }
 

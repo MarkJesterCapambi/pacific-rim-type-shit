@@ -1,0 +1,16 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1534f1c8144746d4fbe7049942c3910f, type: 3}
+  m_Name: MemePackCatalog
+  m_EditorClassIdentifier: Assembly-CSharp::PacificRimMeme.MemePackCatalog
+  freddyJumpscareClip: {fileID: 32900000, guid: 5ce136a7a85666e4489ef6685f784fde, type: 3}
+  f22RaptorPrefab: {fileID: 4530025337365728965, guid: 0a144d6ec1bc9bb44be1bb592d0fa079, type: 3}

@@ -694,7 +694,7 @@ namespace PacificRimWater
         void OnGUI()
         {
             var jaegerCtrl = SimpleJaegerController.Instance;
-            if (PacificRimUI.MainMenuUI.IsMenuOpen || !showCrosshair || (jaegerCtrl != null && jaegerCtrl.IsPlasmaCinematicActive) || Event.current.type != EventType.Repaint) return;
+            if (PacificRimUI.MainMenuUI.IsMenuOpen || PacificRimMeme.MemeCommandController.ShouldSuppressCrosshair || !showCrosshair || (jaegerCtrl != null && jaegerCtrl.IsPlasmaCinematicActive) || Event.current.type != EventType.Repaint) return;
 
             float cx = Screen.width * 0.5f;
             float cy = Screen.height * 0.5f;
