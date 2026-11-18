@@ -201,13 +201,13 @@ namespace PacificRimWater
                 water = WaterSystem.Instance;
             }
 
-            bool isDeepUnderwaterMode = (water == null) || (WaterSplashManager.Instance != null && WaterSplashManager.Instance.IsDeepUnderwater);
+            bool isDeepUnderwaterMode = WaterSplashManager.Instance != null && WaterSplashManager.Instance.IsDeepUnderwater;
             if (water == null)
             {
                 IsWading = false;
                 SubmergedDepth = isDeepUnderwaterMode ? 60f : 0f;
 
-                if (horizontalSpeed > 0.45f && WaterSplashManager.Instance != null)
+                if (isDeepUnderwaterMode && horizontalSpeed > 0.45f && WaterSplashManager.Instance != null)
                 {
                     wakeTrailAccumulator += horizontalSpeed * Time.deltaTime;
                     if (wakeTrailAccumulator >= Mathf.Max(0.35f, wakeTrailStepDistance * 1.15f))
@@ -229,7 +229,8 @@ namespace PacificRimWater
             LeftLegSurfacePoint = ComputeLegWaterlinePoint(leftShinTransform, leftThighTransform, -1f, oceanSurfaceY);
             RightLegSurfacePoint = ComputeLegWaterlinePoint(rightShinTransform, rightThighTransform, 1f, oceanSurfaceY);
 
-            bool inWater = SubmergedDepth > 0.1f;
+            bool inWater = SubmergedDepth > 0.1f && !WaterSystem.IsDryLandAt(currentPos, out _);
+            if (!inWater) SubmergedDepth = Mathf.Min(0f, SubmergedDepth);
             bool isFullySubmerged = SubmergedDepth > 24.5f || (WaterSplashManager.Instance != null && WaterSplashManager.Instance.IsDeepUnderwater);
 
             if (inWater && !wasInWater)
@@ -363,7 +364,11 @@ namespace PacificRimWater
             }
 
             bool isDeepUnderwater = SubmergedDepth > 24.5f || (WaterSplashManager.Instance != null && WaterSplashManager.Instance.IsDeepUnderwater);
-            if (water != null && !isDeepUnderwater)
+            if (WaterSystem.IsDryLandAt(footContact, out float dryFootY))
+            {
+                footContact.y = dryFootY + 0.05f;
+            }
+            else if (water != null && !isDeepUnderwater)
             {
                 footContact.y = water.GetWaterHeight(footContact);
             }
@@ -499,7 +504,7 @@ namespace PacificRimWater
         public void TriggerFootstepImpact(Vector3 contactPoint, float radius, float strength, bool triggerCameraShake = true)
         {
             bool isDeepUnderwater = SubmergedDepth > 24.5f || (WaterSplashManager.Instance != null && WaterSplashManager.Instance.IsDeepUnderwater);
-            if (water != null && !isDeepUnderwater)
+            if (water != null && !isDeepUnderwater && !WaterSystem.IsDryLandAt(contactPoint, out _))
             {
                 bool isHeavyLunge = controller != null && controller.IsSprintAttacking;
                 float finalRadius = isHeavyLunge ? Mathf.Max(radius, 26f) : radius;

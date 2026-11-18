@@ -31,6 +31,10 @@ namespace PacificRimEnvironment
         public float rotationSwapInterval = 5.0f;
         public bool enableAutomaticRotation = true;
 
+        [Header("Urban Canyon Flight")]
+        public bool urbanCanyonMode = false;
+        public float urbanMinClearanceY = 72f;
+
         [Header("Squadron Assets & Materials")]
         public GameObject chinookPrefab;
         public Material volumetricBeamMaterial;
@@ -68,7 +72,11 @@ namespace PacificRimEnvironment
 
             if (kaijuTarget == null)
             {
-                var kaiju = GameObject.Find("Kaiju_Leatherback") ?? GameObject.Find("Leatherback");
+                var kaiju = GameObject.Find("Kaiju_Leatherback")
+                            ?? GameObject.Find("Leatherback")
+                            ?? GameObject.Find("Kaiju_Otachi")
+                            ?? (PacificRimWater.KaijuAI.Instance != null ? PacificRimWater.KaijuAI.Instance.gameObject : null)
+                            ?? FindAnyObjectByType<PacificRimWater.KaijuAI>()?.gameObject;
                 if (kaiju != null) kaijuTarget = kaiju.transform;
             }
         }
@@ -136,14 +144,14 @@ namespace PacificRimEnvironment
                 kaijuSquadron.Remove(kaijuCandidate);
                 gipsySquadron.Add(kaijuCandidate);
 
-                // Command Gipsy Chinook to fly over and watch Leatherback
-                float newRadiusForKaiju = Random.Range(32f, 48f);
-                float newAltitudeForKaiju = Random.Range(40f, 52f);
+                // Command Gipsy Chinook to fly over and watch Kaiju
+                float newRadiusForKaiju = urbanCanyonMode ? Random.Range(24f, 38f) : Random.Range(32f, 48f);
+                float newAltitudeForKaiju = urbanCanyonMode ? Random.Range(74f, 94f) : Random.Range(40f, 52f);
                 gipsyCandidate.BeginTransitionTo(kaijuTarget, ChinookTargetType.Leatherback, newRadiusForKaiju, newAltitudeForKaiju);
 
-                // Command Leatherback Chinook to fly over and watch Gipsy
-                float newRadiusForGipsy = Random.Range(28f, 44f);
-                float newAltitudeForGipsy = Random.Range(38f, 50f);
+                // Command Kaiju Chinook to fly over and watch Gipsy
+                float newRadiusForGipsy = urbanCanyonMode ? Random.Range(24f, 38f) : Random.Range(28f, 44f);
+                float newAltitudeForGipsy = urbanCanyonMode ? Random.Range(72f, 92f) : Random.Range(38f, 50f);
                 kaijuCandidate.BeginTransitionTo(gipsyTarget, ChinookTargetType.Gipsy, newRadiusForGipsy, newAltitudeForGipsy);
             }
         }
@@ -163,6 +171,8 @@ namespace PacificRimEnvironment
 
             if (gipsySquadron.Count >= 3 && kaijuSquadron.Count >= 3)
             {
+                for (int i = 0; i < gipsySquadron.Count; i++) ApplyModeToAgent(gipsySquadron[i]);
+                for (int i = 0; i < kaijuSquadron.Count; i++) ApplyModeToAgent(kaijuSquadron[i]);
                 return;
             }
 
@@ -170,6 +180,7 @@ namespace PacificRimEnvironment
             var existingAgents = GetComponentsInChildren<ChinookCombatPatrolAgent>(true);
             foreach (var a in existingAgents)
             {
+                ApplyModeToAgent(a);
                 if (a.targetType == ChinookTargetType.Gipsy && !gipsySquadron.Contains(a))
                     gipsySquadron.Add(a);
                 else if (a.targetType == ChinookTargetType.Leatherback && !kaijuSquadron.Contains(a))
@@ -178,6 +189,8 @@ namespace PacificRimEnvironment
 
             if (gipsySquadron.Count >= 3 && kaijuSquadron.Count >= 3)
             {
+                for (int i = 0; i < gipsySquadron.Count; i++) ApplyModeToAgent(gipsySquadron[i]);
+                for (int i = 0; i < kaijuSquadron.Count; i++) ApplyModeToAgent(kaijuSquadron[i]);
                 return;
             }
 
@@ -185,8 +198,8 @@ namespace PacificRimEnvironment
             ResolveTargets();
 
             // Spawn Gipsy patrol (3 Chinooks)
-            float[] gipsyRadii = new float[] { 28f, 38f, 48f };
-            float[] gipsyAltitudes = new float[] { 40f, 45f, 50f };
+            float[] gipsyRadii = urbanCanyonMode ? new float[] { 24f, 31f, 38f } : new float[] { 28f, 38f, 48f };
+            float[] gipsyAltitudes = urbanCanyonMode ? new float[] { 72f, 80f, 90f } : new float[] { 40f, 45f, 50f };
             float[] gipsySpeeds = new float[] { 0.44f, 0.38f, 0.48f };
 
             while (gipsySquadron.Count < 3)
@@ -197,9 +210,9 @@ namespace PacificRimEnvironment
                 gipsySquadron.Add(agent);
             }
 
-            // Spawn Leatherback patrol (3 Chinooks)
-            float[] kaijuRadii = new float[] { 32f, 42f, 52f };
-            float[] kaijuAltitudes = new float[] { 42f, 48f, 54f };
+            // Spawn Kaiju patrol (3 Chinooks)
+            float[] kaijuRadii = urbanCanyonMode ? new float[] { 25f, 32f, 38f } : new float[] { 32f, 42f, 52f };
+            float[] kaijuAltitudes = urbanCanyonMode ? new float[] { 75f, 84f, 94f } : new float[] { 42f, 48f, 54f };
             float[] kaijuSpeeds = new float[] { 0.42f, 0.36f, 0.46f };
 
             while (kaijuSquadron.Count < 3)
@@ -270,8 +283,31 @@ namespace PacificRimEnvironment
                 agent = go.AddComponent<ChinookCombatPatrolAgent>();
             }
 
+            ApplyModeToAgent(agent);
+
             agent.Initialize(target, type, radius, altitude, speed, angle, direction);
             return agent;
+        }
+
+        private void ApplyModeToAgent(ChinookCombatPatrolAgent agent)
+        {
+            if (agent == null) return;
+            agent.avoidUrbanBuildings = urbanCanyonMode;
+            agent.minUrbanClearanceY = urbanMinClearanceY;
+            if (urbanCanyonMode)
+            {
+                agent.baseLightIntensity = 1450f;
+                agent.lightningPeakIntensity = 3600f;
+                agent.baseLightRange = 165f;
+                agent.lightningPeakRange = 230f;
+            }
+            else
+            {
+                agent.baseLightIntensity = 950f;
+                agent.lightningPeakIntensity = 2800f;
+                agent.baseLightRange = 110f;
+                agent.lightningPeakRange = 165f;
+            }
         }
 
         private void SetupChinookSearchlightAndBeam(GameObject go)
@@ -290,10 +326,10 @@ namespace PacificRimEnvironment
             if (spot == null) spot = lightNode.gameObject.AddComponent<Light>();
             spot.type = LightType.Spot;
             spot.color = new Color(0.88f, 0.94f, 1.0f);
-            spot.range = 110f;
+            spot.range = urbanCanyonMode ? 165f : 110f;
             spot.spotAngle = 46f;
             spot.innerSpotAngle = 26f;
-            spot.intensity = 950f;
+            spot.intensity = urbanCanyonMode ? 1450f : 950f;
             spot.shadows = LightShadows.None;
 
             // Child Volumetric Light Beam Cone

@@ -261,7 +261,7 @@ namespace PacificRimAudio
                 nextRefSearchTime = Time.unscaledTime + 0.5f;
             }
 
-            // 1. Check Cutscene State (Level 1 Deployment, Level 2 Intro, Level 2 Ending, or The Anteverse)
+            // 1. Check Cutscene State (Level 1 Deployment, Harbor->Neon, Level 2 Intro/Ending, or The Anteverse)
             bool isAnteverseScene = !string.IsNullOrEmpty(sceneName) &&
                                     sceneName.IndexOf("Anteverse", StringComparison.OrdinalIgnoreCase) >= 0;
             bool isEndingCutscene = isAnteverseScene ||
@@ -269,6 +269,16 @@ namespace PacificRimAudio
                                     (AnteverseEndingCutscene.Instance != null && AnteverseEndingCutscene.Instance.isCutsceneRunning);
             if (isEndingCutscene)
             {
+                return;
+            }
+
+            if (PacificRimCutscene.HarborToNeonTransitionState.IsAnyCutsceneRunning)
+            {
+                if (currentState != MusicState.CutsceneEnteringSuspense)
+                {
+                    AudioClip clip = enteringSuspenseClip != null ? enteringSuspenseClip : noSuspenseClip;
+                    TransitionToLoopingState(MusicState.CutsceneEnteringSuspense, clip, 0.85f);
+                }
                 return;
             }
 

@@ -54,6 +54,7 @@ namespace PacificRimAudio
 
         [Header("Scene Audio Mode")]
         public bool isUnderwaterLevel = false;
+        public bool isDryLandLevel = false;
         private bool suppressLoopsForEndingCutscene = false;
 
         private const string SfxVolumePrefKey = "PR_SFXVolume";
@@ -140,6 +141,11 @@ namespace PacificRimAudio
             isUnderwaterLevel = !isCutscene && !isAnteverse &&
                                 !string.IsNullOrEmpty(sceneName) &&
                                 sceneName.IndexOf("Operation Pitfall", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            bool splashMgrDry = PacificRimWater.WaterSplashManager.Instance != null && PacificRimWater.WaterSplashManager.Instance.isDryLandMode;
+            isDryLandLevel = !isCutscene && !isAnteverse && !isUnderwaterLevel &&
+                             (splashMgrDry || (PacificRimWater.WaterSystem.Instance == null && !string.IsNullOrEmpty(sceneName) &&
+                             (sceneName.IndexOf("Hong Kong", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                              sceneName.IndexOf("Neon", System.StringComparison.OrdinalIgnoreCase) >= 0)));
 
             if (!isAnteverse)
             {
@@ -565,7 +571,11 @@ namespace PacificRimAudio
         // 5. Ocean & Seabed Footsteps
         public void PlayOceanFootstep(Vector3 pos, float intensity = 1f)
         {
-            if (isUnderwaterLevel && underwaterFootstepPool.Count > 0)
+            bool useHeavyGroundStep = isUnderwaterLevel || isDryLandLevel ||
+                (PacificRimWater.WaterSplashManager.Instance != null && PacificRimWater.WaterSplashManager.Instance.isDryLandMode) ||
+                PacificRimWater.WaterSystem.IsDryLandAt(pos, out _);
+
+            if (useHeavyGroundStep && underwaterFootstepPool.Count > 0)
             {
                 var uwClip = underwaterFootstepPool[Random.Range(0, underwaterFootstepPool.Count)];
                 PlayAtPosition(uwClip, pos, volume: Mathf.Clamp01(0.85f * intensity), pitchMin: 0.94f, pitchMax: 1.04f);

@@ -1,4 +1,5 @@
 using UnityEngine;
+using PacificRimEnvironment;
 
 namespace PacificRimWater
 {
@@ -76,6 +77,31 @@ namespace PacificRimWater
         public float blockDamageReduction = 0.80f;
         [Tooltip("Speed multiplier while blocking.")]
         public float blockSpeedMultiplier = 0.35f;
+
+        private float acidCorrosionEndTime = -10f;
+        public bool IsAcidCorroded => !IsDead && Time.time < acidCorrosionEndTime;
+        public float AcidCorrosionRemaining => IsAcidCorroded ? Mathf.Max(0f, acidCorrosionEndTime - Time.time) : 0f;
+
+        public void ApplyAcidCorrosion(float duration = 7.0f)
+        {
+            if (IsDead || IsGodModeActive) return;
+            acidCorrosionEndTime = Mathf.Max(acidCorrosionEndTime, Time.time + duration);
+        }
+
+        public void TakeCorrosivePoolDamage(float amount, float corrosionDuration = 6.5f)
+        {
+            if (IsDead || IsGodModeActive) return;
+            ApplyAcidCorrosion(corrosionDuration);
+            float dmg = IsIronmanCheatActive ? amount / 3f : amount;
+            currentHealth = Mathf.Max(0f, currentHealth - dmg);
+            Vector3 impactPos = transform.position + Vector3.up * 2.5f;
+            WaterSplashManager.Instance?.SpawnCombatSparks(impactPos, transform.forward, isBlocked: false, isHeavy: false, isKaijuTarget: false);
+            PacificRimUI.JaegerHUD.Instance?.TriggerScreenImpact(wasBlocked: false, isHeavy: false);
+            if (currentHealth <= 0f)
+            {
+                Die();
+            }
+        }
 
         [Header("Parry System")]
         [Tooltip("Precision time window in seconds after raising block where an incoming strike is perfectly parried (tightened to 0.18s for high-skill deflection).")]
@@ -1558,7 +1584,8 @@ namespace PacificRimWater
         private bool ApplyStrikeImpact(Vector3 strikePos, float range, float damage, float knockbackDist, float waveRadius, float waveStrength, int attackVariant = 0)
         {
             Vector3 rawStrikePos = strikePos;
-            if (WaterSystem.Instance != null)
+            if (WaterSystem.Instance != null && !WaterSystem.IsDryLandAt(strikePos, out _) &&
+                (waterInteraction == null || waterInteraction.IsWading))
             {
                 Vector3 waterPos = strikePos;
                 waterPos.y = WaterSystem.Instance.GetWaterHeight(strikePos);
@@ -1579,6 +1606,45 @@ namespace PacificRimWater
                 {
                     if (col == null || col.transform.IsChildOf(transform)) continue;
                     if (col.gameObject.name == "Test_Platform" || col.gameObject.name == "Ground" || col.gameObject.tag == "Ground") continue;
+
+                    if (pass == 0)
+                    {
+                        var hkDestructible = col.GetComponentInParent<HongKongDestructibleStructure>();
+                        if (hkDestructible != null)
+                        {
+                            hkDestructible.BreakFromImpact(transform.position, transform.forward, attackVariant >= 4 ? 1.35f : 1.0f);
+                            didHit = true;
+                            continue;
+                        }
+
+                        var collateral = col.GetComponentInParent<UrbanCollateralProp>();
+                        if (collateral != null)
+                        {
+                            collateral.TriggerImpact(transform.position);
+                            didHit = true;
+                            continue;
+                        }
+
+                        var impactReceiver = col.GetComponentInParent<UrbanBuildingImpactReceiver>();
+                        if (impactReceiver != null && !col.isTrigger)
+                        {
+                            Vector3 hitPt = col.ClosestPoint(center);
+                            Vector3 n = center - hitPt;
+                            if (n.sqrMagnitude < 0.001f) n = -transform.forward;
+                            impactReceiver.RegisterImpact(hitPt, n.normalized, attackVariant >= 4);
+                            didHit = true;
+                            continue;
+                        }
+                    }
+
+                    string colName = col.gameObject.name;
+                    if (colName.StartsWith("City_") || colName.StartsWith("Building") || colName.StartsWith("Sidewalk") ||
+                        colName.StartsWith("Barrier_") || colName.StartsWith("Roadblock") || colName.StartsWith("Highway_") ||
+                        colName.StartsWith("Streetlight") || colName.StartsWith("Gantry") ||
+                        colName.StartsWith("Collateral_") || colName.StartsWith("Harbour_") || colName.StartsWith("Harbor_") ||
+                        colName.StartsWith("Seawall_") || colName.StartsWith("Skybridge_") || colName.StartsWith("Scaffold_") ||
+                        colName.StartsWith("Overpass_") || colName.StartsWith("Tram_") || colName.StartsWith("Tanker_") ||
+                        colName.StartsWith("Prop_")) continue;
 
                     var kaiju = col.GetComponentInParent<KaijuAI>();
                     if (kaiju != null)
@@ -1700,7 +1766,7 @@ namespace PacificRimWater
             if (!isHeavy && amount >= 65f) isHeavy = true;
 
             Vector3 impactPos = hitPoint.sqrMagnitude > 0.01f ? hitPoint : (transform.position + transform.forward * 3.2f + Vector3.up * 15.5f);
-            float actualAmount = amount;
+            float actualAmount = IsAcidCorroded ? amount * 1.28f : amount;
             bool blockedHit = isBlocking && !IsExhausted;
             bool isParry = blockedHit && (Time.time <= LastBlockStartTime + parryWindow);
 
@@ -1753,7 +1819,10 @@ namespace PacificRimWater
             {
                 ConsumeStamina(isHeavy ? blockHeavyStaminaCost : blockLightStaminaCost);
                 AddUltimateCharge(isHeavy ? ultChargeBlock * 1.5f : ultChargeBlock);
-                actualAmount = amount * (1f - Mathf.Clamp01(blockDamageReduction));
+                float effectiveBlockReduction = IsAcidCorroded
+                    ? Mathf.Clamp01(blockDamageReduction - 0.25f)
+                    : Mathf.Clamp01(blockDamageReduction);
+                actualAmount = actualAmount * (1f - effectiveBlockReduction);
                 if (animator != null)
                 {
                     animator.SetTrigger("BlockHit");
@@ -2407,7 +2476,7 @@ namespace PacificRimWater
             {
                 return kaijuCol.bounds.center + Vector3.up * (kaijuCol.bounds.extents.y * 0.12f);
             }
-            return kaiju.transform.position + Vector3.up * (kaiju.isSlattern ? 16.5f : 13.5f);
+            return kaiju.transform.position + Vector3.up * (kaiju.isSlattern ? 16.5f : (kaiju.isOtachi ? 11.5f : 13.5f));
         }
 
         private Vector3 ResolvePlasmaAimTarget()
@@ -2925,6 +2994,8 @@ namespace PacificRimWater
             float travelElapsed = 0f;
             float wakeTimer = 0f;
             bool impacted = false;
+            UrbanBuildingImpactReceiver hitBuildingReceiver = null;
+            Vector3 hitBuildingNormal = Vector3.up;
             Collider[] kaijuCols = (cachedKaiju != null && !cachedKaiju.IsDead)
                 ? cachedKaiju.GetComponentsInChildren<Collider>()
                 : null;
@@ -2997,6 +3068,23 @@ namespace PacificRimWater
                         break;
                     }
                 }
+
+                HongKongDestructibleStructure.TriggerBreakInRadius(nextPos, 5.5f, dir * 24f, 1.4f);
+                if (Physics.SphereCast(prevPos, 1.6f, dir, out RaycastHit envHit, step + 1.0f, ~0, QueryTriggerInteraction.Ignore))
+                {
+                    if (envHit.collider != null && !envHit.collider.transform.IsChildOf(transform) &&
+                        envHit.collider.GetComponentInParent<KaijuAI>() == null)
+                    {
+                        var recv = envHit.collider.GetComponentInParent<UrbanBuildingImpactReceiver>();
+                        if (recv != null)
+                        {
+                            bolt.transform.position = envHit.point;
+                            hitBuildingReceiver = recv;
+                            hitBuildingNormal = envHit.normal;
+                            break;
+                        }
+                    }
+                }
                 yield return null;
             }
 
@@ -3004,6 +3092,15 @@ namespace PacificRimWater
             {
                 Vector3 hitPos = bolt.transform.position;
                 Destroy(bolt);
+
+                HongKongDestructibleStructure.TriggerBreakInRadius(hitPos, 16f, dir * 26f, 1.5f);
+                if (hitBuildingReceiver != null)
+                {
+                    hitBuildingReceiver.RegisterImpact(hitPos, hitBuildingNormal, isHeavy: true);
+                    WaterSplashManager.Instance?.SpawnParrySparks(hitPos, hitBuildingNormal);
+                    PacificRimAudio.PacificRimAudioManager.Instance?.PlayLightningStrike(hitPos);
+                    TriggerAttackCameraFeedback(4, isHeavy: true, didHit: false);
+                }
 
                 if (impacted && cachedKaiju != null && !cachedKaiju.IsDead)
                 {

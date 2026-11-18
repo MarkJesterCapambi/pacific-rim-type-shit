@@ -1832,7 +1832,7 @@ namespace PacificRimCutscene
             epilogue.lineSpacing = 1.25f;
             SetTopCenter(epilogue.rectTransform, -130f, 560f, 74f);
 
-            float bestTime = PacificRimCombatRecords.GetBestTime(MainMenuUI.Level2SceneName);
+            float bestTime = PacificRimCombatRecords.GetBestTime(MainMenuUI.Level3SceneName);
             string timeLine = RecordedCombatTime > 0.5f
                 ? $"SLATTERN TIME {PacificRimCombatRecords.FormatTime(RecordedCombatTime)}  ·  BEST {PacificRimCombatRecords.FormatTime(bestTime)}"
                 : $"BEST TIME {PacificRimCombatRecords.FormatTime(bestTime)}";
@@ -1852,7 +1852,7 @@ namespace PacificRimCutscene
                 "REPLAY OPERATION PITFALL", isPrimary: false, onClick: () =>
                 {
                     PacificRimUISound.PlayClick();
-                    PacificRimLoadingScreen.LoadScene(MainMenuUI.Level2SceneName);
+                    PacificRimLoadingScreen.LoadScene(MainMenuUI.Level3SceneName);
                 });
 
             _ = btnMainMenu;

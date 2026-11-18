@@ -163,6 +163,11 @@ namespace PacificRimUI
                     sectorSubText.text = "SECTOR 09 // THE ANTEVERSE";
                 else if (sceneName.IndexOf("Operation Pitfall", StringComparison.OrdinalIgnoreCase) >= 0)
                     sectorSubText.text = "SECTOR 09 // MARIANA TRENCH";
+                else if (sceneName.IndexOf("Otachi", StringComparison.OrdinalIgnoreCase) >= 0)
+                    sectorSubText.text = "SECTOR 05 // HONG KONG CITY CENTER";
+                else if (sceneName.IndexOf("Hong Kong", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                         sceneName.IndexOf("Neon", StringComparison.OrdinalIgnoreCase) >= 0)
+                    sectorSubText.text = "SECTOR 05 // KOWLOON EXPRESSWAY";
                 else if (sceneName.IndexOf("Save Striker Eureka", StringComparison.OrdinalIgnoreCase) >= 0)
                     sectorSubText.text = "SECTOR 04 // HONG KONG BAY";
                 else
@@ -242,14 +247,15 @@ namespace PacificRimUI
                     targetStatus = status;
                 }));
 
-                // Signal either the aerial deployment cutscene (Level 1), Operation Pitfall intro cutscene (Level 2), or the underwater intro
+                // Signal aerial deployment cutscene (Level 1), Otachi intro cutscene (Level 2), Operation Pitfall intro (Level 3), or underwater intro
                 var cutscene = FindAnyObjectByType<PacificRimCutscene.PacificRimDeploymentCutscene>();
+                var otachiIntro = FindAnyObjectByType<PacificRimCutscene.OtachiIntroCutscene>();
                 var pitfallCutscene = FindAnyObjectByType<PacificRimCutscene.OperationPitfallIntroCutscene>();
                 if (cutscene != null)
                 {
                     cutscene.StartCutscene();
                 }
-                else if (pitfallCutscene == null)
+                else if (otachiIntro == null && pitfallCutscene == null)
                 {
                     var underwaterCtrl = FindAnyObjectByType<PacificRimAtmosphere.UnderwaterEnvironmentController>();
                     if (underwaterCtrl != null)
@@ -294,6 +300,12 @@ namespace PacificRimUI
 
             if (isGameplay)
             {
+                var otachiIntro = FindAnyObjectByType<PacificRimCutscene.OtachiIntroCutscene>();
+                if (otachiIntro != null)
+                {
+                    otachiIntro.StartCutscene();
+                }
+
                 var pitfallCutscene = FindAnyObjectByType<PacificRimCutscene.OperationPitfallIntroCutscene>();
                 if (pitfallCutscene != null)
                 {

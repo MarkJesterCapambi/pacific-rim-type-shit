@@ -203,6 +203,7 @@ namespace PacificRimWater
                 float ang = UnityEngine.Random.value * Mathf.PI * 2f;
                 float radius = Mathf.Lerp(crestMinRadius, crestMaxRadius, Mathf.Sqrt(UnityEngine.Random.value));
                 Vector3 p = new Vector3(center.x + Mathf.Cos(ang) * radius, 0f, center.z + Mathf.Sin(ang) * radius);
+                if (WaterSystem.IsDryLandAt(p, out _)) continue;
 
                 float h = water.GetWaterHeight(p);
                 float waveHeight = h - meanY;

@@ -89,6 +89,7 @@ namespace PacificRimUI
         private bool wasPoweredUp;
         private bool wasInStance;
         private bool wasBlocking;
+        private bool wasAcidCorroded;
         private bool wasKaijuEmpBuffed;
         private bool wasKaijuDead;
         private bool wasJaegerDead;
@@ -479,6 +480,11 @@ namespace PacificRimUI
             UpdateEmpGlitchEffect();
         }
 
+        public void SyncStateImmediate()
+        {
+            SyncImmediate();
+        }
+
         private void SyncImmediate()
         {
             if (jaeger == null) return;
@@ -652,6 +658,27 @@ namespace PacificRimUI
                 combatStanceValueText.color = bladesActive ? PacificRimUITheme.BlueBright : PacificRimUITheme.TextMuted;
             }
 
+            bool corroded = jaeger.IsAcidCorroded;
+            if (corroded && !wasAcidCorroded)
+            {
+                ShowBanner("<color=#42f59b><b>ACID CORROSION  ·  ARMOR & GUARD WEAKENED</b></color>", 2.2f);
+            }
+            wasAcidCorroded = corroded;
+
+            if (hullCaptionText != null && !wasHudGlitching)
+            {
+                if (corroded)
+                {
+                    hullCaptionText.text = $"CORRODED {jaeger.AcidCorrosionRemaining:0.0}S";
+                    hullCaptionText.color = new Color(0.28f, 0.96f, 0.56f, 1f);
+                }
+                else
+                {
+                    hullCaptionText.text = "HULL";
+                    hullCaptionText.color = PacificRimUITheme.TextDim;
+                }
+            }
+
             if (defenseMatrixValueText != null)
             {
                 defenseMatrixValueText.supportRichText = true;
@@ -659,6 +686,11 @@ namespace PacificRimUI
                 {
                     defenseMatrixValueText.text = "LOCKED";
                     defenseMatrixValueText.color = PacificRimUITheme.Danger;
+                }
+                else if (corroded)
+                {
+                    defenseMatrixValueText.text = blocking ? "CORRODED (-25%)" : "ACID CORRODED";
+                    defenseMatrixValueText.color = new Color(0.28f, 0.96f, 0.56f, 1f);
                 }
                 else
                 {
@@ -676,11 +708,23 @@ namespace PacificRimUI
                     depthTelemetryText.text = "FREECAM";
                     depthTelemetryText.color = PacificRimUITheme.Amber;
                 }
+                else if (WaterSplashManager.Instance != null && WaterSplashManager.Instance.isDryLandMode)
+                {
+                    depthTelemetryText.text = "SURFACE";
+                    depthTelemetryText.color = PacificRimUITheme.TextDim;
+                }
                 else if (WaterSystem.Instance != null)
                 {
-                    float waterY = WaterSystem.Instance.GetWaterHeight(jaeger.transform.position);
-                    float depth = Mathf.Max(0f, waterY - jaeger.transform.position.y);
-                    depthTelemetryText.text = $"{depth:0}M";
+                    if (WaterSystem.IsDryLandAt(jaeger.transform.position, out _))
+                    {
+                        depthTelemetryText.text = "SURFACE";
+                    }
+                    else
+                    {
+                        float waterY = WaterSystem.Instance.GetWaterHeight(jaeger.transform.position);
+                        float depth = Mathf.Max(0f, waterY - jaeger.transform.position.y);
+                        depthTelemetryText.text = depth > 0.15f ? $"{depth:0}M" : "SURFACE";
+                    }
                     depthTelemetryText.color = PacificRimUITheme.TextDim;
                 }
                 else
@@ -972,17 +1016,29 @@ namespace PacificRimUI
 
             if (kaiju.CurrentPhase > wasKaijuPhase)
             {
-                string overdriveName = kaiju.isSlattern ? "ABYSSAL OVERDRIVE" : "EMP OVERDRIVE";
-                if (kaiju.CurrentPhase == 2)
-                    ShowBanner($"{kaiju.kaijuDisplayName}  ·  PHASE II {overdriveName}", 3.0f);
-                else if (kaiju.CurrentPhase >= 3)
-                    ShowBanner($"{kaiju.kaijuDisplayName}  ·  PHASE III BERSERK", 3.2f);
+                if (kaiju.isOtachi)
+                {
+                    string otachiPhaseTitle = kaiju.CurrentPhase == 2
+                        ? "PHASE II ACID LOCKDOWN"
+                        : "PHASE III AIRBORNE DIVE-BOMBER";
+                    ShowBanner($"{kaiju.kaijuDisplayName}  ·  {otachiPhaseTitle}", 3.2f);
+                }
+                else
+                {
+                    string overdriveName = kaiju.isSlattern ? "ABYSSAL OVERDRIVE" : "EMP OVERDRIVE";
+                    if (kaiju.CurrentPhase == 2)
+                        ShowBanner($"{kaiju.kaijuDisplayName}  ·  PHASE II {overdriveName}", 3.0f);
+                    else if (kaiju.CurrentPhase >= 3)
+                        ShowBanner($"{kaiju.kaijuDisplayName}  ·  PHASE III BERSERK", 3.2f);
+                }
             }
             wasKaijuPhase = kaiju.CurrentPhase;
 
             if (kaiju.IsEmpBuffed && !wasKaijuEmpBuffed)
             {
-                string surgeLabel = kaiju.isSlattern ? "ABYSSAL SURGE" : "EMP SURGE";
+                string surgeLabel = kaiju.isSlattern
+                    ? "ABYSSAL SURGE"
+                    : (kaiju.isOtachi ? "ACID SURGE" : "EMP SURGE");
                 ShowBanner($"{kaiju.kaijuDisplayName}  ·  {surgeLabel}", 2.5f);
             }
             wasKaijuEmpBuffed = kaiju.IsEmpBuffed;
@@ -1023,6 +1079,12 @@ namespace PacificRimUI
                 if (k.CurrentPhase == 2) return "PHASE II · BLITZER";
                 return "PHASE I · STALKER";
             }
+            if (k.isOtachi)
+            {
+                if (k.CurrentPhase == 3) return "PHASE III · DIVE-BOMBER";
+                if (k.CurrentPhase == 2) return "PHASE II · ACID LOCKDOWN";
+                return "PHASE I · SKIRMISHER";
+            }
             if (k.CurrentPhase == 3) return "PHASE III · BERSERK";
             if (k.CurrentPhase == 2) return "PHASE II · OVERDRIVE";
             return "PHASE I";
@@ -1037,6 +1099,17 @@ namespace PacificRimUI
             if (k.IsStaggered) return "STAGGERED";
             if (k.IsMovingGuardActive) return "MOVING GUARD · HEAVY BREAKS";
             if (k.IsBlocking) return "GUARDING";
+            if (k.isOtachi)
+            {
+                if (k.activePattern == KaijuAI.AttackPattern.OtachiDiveBomberRush) return "DIVE-BOMBER RUSH";
+                if (k.activePattern == KaijuAI.AttackPattern.OtachiAcidSpraySweep) return "ACID SPRAY SWEEP";
+                if (k.activePattern == KaijuAI.AttackPattern.OtachiTailWhipPunish) return "TAIL WHIP PUNISH";
+                if (k.currentState == KaijuAI.AIState.Retreating) return "BACK-DASH // ACID";
+                if (k.IsEmpBuffed || k.currentState == KaijuAI.AIState.EmpRoar) return "ACID DISCHARGE";
+                if (k.currentState == KaijuAI.AIState.Attacking) return "SKIRMISH LUNGE";
+                if (k.currentState == KaijuAI.AIState.SizingUp) return "KEEP-AWAY STALK";
+                return "SKIRMISHER";
+            }
             if (k.IsEmpBuffed) return k.isSlattern ? "ABYSSAL SURGE" : "EMP SURGE";
             if (k.currentState == KaijuAI.AIState.Retreating) return "RETREATING";
             if (k.currentState == KaijuAI.AIState.Attacking) return "ATTACKING";
@@ -1341,7 +1414,9 @@ namespace PacificRimUI
 
                 string alertMsg = kaiju.isSlattern
                     ? "<color=#ff645a><b>ABYSSAL RESONANCE  ·  HUD TELEMETRY DISRUPTED</b></color>"
-                    : "<color=#46c3ff><b>BIO-EMP INTERFERENCE  ·  HUD TELEMETRY DISRUPTED</b></color>";
+                    : (kaiju.isOtachi
+                        ? "<color=#42f59b><b>ACID BIO-SURGE  ·  HUD TELEMETRY DISRUPTED</b></color>"
+                        : "<color=#46c3ff><b>BIO-EMP INTERFERENCE  ·  HUD TELEMETRY DISRUPTED</b></color>");
                 ShowBanner(alertMsg, 2.3f);
                 PacificRimAudio.PacificRimAudioManager.Instance?.PlayUiClick();
             }
@@ -1354,7 +1429,9 @@ namespace PacificRimUI
             }
 
             float tickSeed = glitchTickCounter * 17.31f;
-            Color accentGlitch = kaiju.isSlattern ? PacificRimUITheme.Danger : PacificRimUITheme.BlueBright;
+            Color accentGlitch = kaiju.isSlattern
+                ? PacificRimUITheme.Danger
+                : (kaiju.isOtachi ? new Color(0.24f, 0.96f, 0.58f, 1f) : PacificRimUITheme.BlueBright);
 
             // Flicker player & boss numeric readouts
             GlitchNumberText(hullNumberText, tickSeed + 1.1f, 7f, 2f, accentGlitch, scrambleChance: 0.42f);

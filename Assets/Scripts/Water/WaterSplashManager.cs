@@ -31,8 +31,10 @@ namespace PacificRimWater
         public float dropletImpactFoamChance = 0.35f;
         [Tooltip("When true (or when WaterSystem is absent), emits sandy seabed silt plumes and rising bubbles instead of surface splashes.")]
         public bool isDeepUnderwaterMode = false;
+        [Tooltip("When true (e.g. City Highway combat), suppresses water droplets/foam/bubbles and emits urban asphalt dust & sparks instead.")]
+        public bool isDryLandMode = false;
 
-        public bool IsDeepUnderwater => isDeepUnderwaterMode || WaterSystem.Instance == null;
+        public bool IsDeepUnderwater => !isDryLandMode && (isDeepUnderwaterMode || WaterSystem.Instance == null);
         private bool appliedUnderwaterSiltTint;
 
         private ParticleSystem droplets;
@@ -589,6 +591,25 @@ namespace PacificRimWater
         /// Footstep / strike splash: a crown of round, stretched droplets, a central jet, rising mist,
         /// and foam + bubbles that spread across the surface.
         /// </summary>
+        private static bool IsDryLandAtPoint(Vector3 pos, WaterSystem water, out Vector3 surfacePos)
+        {
+            surfacePos = pos;
+            if (Instance != null && Instance.isDryLandMode)
+                return true;
+
+            if (WaterSystem.IsDryLandAt(pos, out float dryGroundY))
+            {
+                surfacePos.y = dryGroundY + 0.05f;
+                return true;
+            }
+
+            if (water != null)
+            {
+                surfacePos.y = water.GetWaterHeight(pos);
+            }
+            return false;
+        }
+
         public void SpawnFootstepSplash(Vector3 position, float scale = 1.0f)
         {
             if (float.IsNaN(position.x) || float.IsNaN(position.y) || float.IsNaN(position.z)) return;
@@ -596,6 +617,29 @@ namespace PacificRimWater
 
             scale = Mathf.Clamp(scale, 0.35f, 2.0f);
             float sizeBias = Mathf.Lerp(0.85f, 1.35f, Mathf.Clamp01(scale / 2f));
+
+            if (IsDryLandAtPoint(position, WaterSystem.Instance, out Vector3 dryPos))
+            {
+                position = dryPos;
+                int dustCount = 8 + Mathf.RoundToInt(6f * scale);
+                for (int i = 0; i < dustCount; i++)
+                {
+                    Vector3 off = Flat(Random.insideUnitCircle * splashSpread * 0.65f * scale);
+                    Vector3 vel = new Vector3(off.x, 0f, off.z) * 1.1f + Vector3.up * Random.Range(0.8f, 2.4f) * scale;
+                    EmitMist(position + off + Vector3.up * 0.25f, vel, Random.Range(4.2f, 8.5f) * scale, Random.Range(0.24f, 0.42f));
+                }
+
+                int volDustCount = 5 + Mathf.RoundToInt(4f * scale);
+                for (int i = 0; i < volDustCount; i++)
+                {
+                    float ang = Random.Range(0f, Mathf.PI * 2f);
+                    Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                    Vector3 pos = position + radial * Random.Range(0.4f, splashSpread * 0.9f * scale) + Vector3.up * Random.Range(0.2f, 1.0f);
+                    Vector3 vel = radial * (Random.Range(2.0f, 4.8f) * scale) + Vector3.up * (Random.Range(0.9f, 2.6f) * scale);
+                    EmitVolumetricMist(pos, vel, Random.Range(5.5f, 10.5f) * scale, Random.Range(0.10f, 0.18f), Random.Range(2.4f, 3.8f));
+                }
+                return;
+            }
 
             if (IsDeepUnderwater)
             {
@@ -714,10 +758,26 @@ namespace PacificRimWater
 
             Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
 
-            Vector3 surfacePos = origin;
-            if (WaterSystem.Instance != null)
+            bool dryAtPoint = IsDryLandAtPoint(origin, WaterSystem.Instance, out Vector3 surfacePos);
+
+            if (dryAtPoint)
             {
-                surfacePos.y = WaterSystem.Instance.GetWaterHeight(origin);
+                int dustPuffs = isHeavy ? 14 : 7;
+                for (int i = 0; i < dustPuffs; i++)
+                {
+                    Vector3 off = forward * Random.Range(0.5f, 6.0f) + right * Random.Range(-3.5f, 3.5f) + Vector3.up * Random.Range(0.2f, 1.4f);
+                    Vector3 vel = forward * Random.Range(2.5f, 7.5f) + right * Random.Range(-2.0f, 2.0f) + Vector3.up * Random.Range(1.2f, 3.8f);
+                    EmitMist(surfacePos + off, vel, Random.Range(5.0f, 11.0f) * clampedIntensity, Random.Range(0.25f, 0.45f));
+                }
+
+                int volDustCount = isHeavy ? 12 : 6;
+                for (int i = 0; i < volDustCount; i++)
+                {
+                    Vector3 off = forward * Random.Range(0.5f, 7.5f) + right * Random.Range(-4.0f, 4.0f) + Vector3.up * Random.Range(0.2f, 1.6f);
+                    Vector3 vel = forward * Random.Range(3.0f, 9.0f) + right * Random.Range(-2.4f, 2.4f) + Vector3.up * Random.Range(1.2f, 4.0f);
+                    EmitVolumetricMist(surfacePos + off, vel, Random.Range(7.0f, 14.0f) * clampedIntensity, Random.Range(0.12f, 0.22f), Random.Range(2.8f, 4.4f));
+                }
+                return;
             }
 
             if (IsDeepUnderwater)
@@ -816,10 +876,19 @@ namespace PacificRimWater
             if (float.IsNaN(impactPoint.x) || float.IsNaN(impactPoint.y) || float.IsNaN(impactPoint.z)) return;
             EnsureSystems();
 
-            Vector3 surfacePos = impactPoint;
-            if (WaterSystem.Instance != null)
+            bool dryAtDrop = IsDryLandAtPoint(impactPoint, WaterSystem.Instance, out Vector3 surfacePos);
+
+            if (dryAtDrop)
             {
-                surfacePos.y = WaterSystem.Instance.GetWaterHeight(impactPoint);
+                for (int i = 0; i < 24; i++)
+                {
+                    float ang = Random.Range(0f, Mathf.PI * 2f);
+                    Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                    Vector3 off = radial * Random.Range(1f, 9.0f) + Vector3.up * Random.Range(0.3f, 2.0f);
+                    Vector3 vel = radial * Random.Range(3.0f, 9.0f) + Vector3.up * Random.Range(2.0f, 6.0f);
+                    EmitMist(surfacePos + off, vel, Random.Range(6.5f, 14.0f), Random.Range(0.28f, 0.48f));
+                }
+                return;
             }
 
             if (IsDeepUnderwater)

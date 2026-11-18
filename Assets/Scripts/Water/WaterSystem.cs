@@ -114,6 +114,10 @@ namespace PacificRimWater
         [Header("Simulation Follows Target")]
         public Transform followTarget;
 
+        [Header("Hybrid Harbour / Dry City Ground Mask")]
+        [Tooltip("Optional raised dry ground & ramp colliders (e.g. Hong Kong City Deck) so footsteps/splashes switch cleanly between harbor water and dry street.")]
+        public Collider[] dryGroundColliders;
+
         private const int MAX_WAKES = 16;
         private readonly Vector4[] wakePositions = new Vector4[MAX_WAKES]; // xyz = worldPos, w = startTime
         private readonly Vector4[] wakeParams = new Vector4[MAX_WAKES];    // x = radius, y = strength, z = speed, w = invLifetime
@@ -454,9 +458,55 @@ namespace PacificRimWater
 
         public bool IsSubmerged(Vector3 worldPos, out float depth)
         {
+            if (IsDryLandAt(worldPos, out _))
+            {
+                depth = 0f;
+                return false;
+            }
             float surfaceY = GetWaterHeight(worldPos);
             depth = surfaceY - worldPos.y;
             return depth > 0f;
+        }
+
+        /// <summary>
+        /// Returns true when world XZ lies on a raised dry city deck or above-water ramp slope.
+        /// Used in hybrid Harbour + Cityscape levels to transition splases/SFX from ocean to dry asphalt.
+        /// </summary>
+        public static bool IsDryLandAt(Vector3 worldPos, out float dryGroundY)
+        {
+            dryGroundY = 0f;
+            var ws = Instance;
+            if (ws == null || ws.dryGroundColliders == null || ws.dryGroundColliders.Length == 0)
+                return false;
+
+            float rayTopY = ws.MeanSurfaceY + 45f;
+            Ray downRay = new Ray(new Vector3(worldPos.x, rayTopY, worldPos.z), Vector3.down);
+            float highestY = float.NegativeInfinity;
+            bool hitAny = false;
+
+            for (int i = 0; i < ws.dryGroundColliders.Length; i++)
+            {
+                Collider c = ws.dryGroundColliders[i];
+                if (c == null || !c.enabled || !c.gameObject.activeInHierarchy) continue;
+                if (c.Raycast(downRay, out RaycastHit hit, 100f))
+                {
+                    if (hit.point.y > highestY)
+                    {
+                        highestY = hit.point.y;
+                        hitAny = true;
+                    }
+                }
+            }
+
+            if (!hitAny) return false;
+
+            float waterY = ws.GetWaterHeight(worldPos);
+            if (highestY >= waterY - 0.10f)
+            {
+                dryGroundY = highestY;
+                return true;
+            }
+            return false;
         }
 
         #endregion

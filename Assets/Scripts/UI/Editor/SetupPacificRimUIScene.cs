@@ -277,10 +277,11 @@ namespace PacificRimUI.Editor
             CreateAccentBar(bossPanel.transform, "BossLeftAccent", true, 3f, PacificRimUITheme.Danger);
 
             bool isPitfall = SceneManager.GetActiveScene().name.IndexOf("Operation Pitfall", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool isOtachi = SceneManager.GetActiveScene().name.IndexOf("Otachi", StringComparison.OrdinalIgnoreCase) >= 0;
             var activeKaiju = UnityEngine.Object.FindAnyObjectByType<PacificRimWater.KaijuAI>();
             string bossHeader = activeKaiju != null
                 ? $"{activeKaiju.kaijuDisplayName}  <color=#8C96A6><size=10>{activeKaiju.kaijuCategoryLabel.Replace("CATEGORY ", "CAT ").Replace(" KAIJU", string.Empty)}</size></color>"
-                : (isPitfall ? "SLATTERN  <color=#8C96A6><size=10>CAT V</size></color>" : "LEATHERBACK  <color=#8C96A6><size=10>CAT IV</size></color>");
+                : (isPitfall ? "SLATTERN  <color=#8C96A6><size=10>CAT V</size></color>" : (isOtachi ? "OTACHI  <color=#8C96A6><size=10>CAT IV</size></color>" : "LEATHERBACK  <color=#8C96A6><size=10>CAT IV</size></color>"));
 
             var bossNameTxt = CreateStyledText("BossNameText", bossPanel.transform, PacificRimTextStyle.Caption,
                 bossHeader, PacificRimUITheme.Text, TextAnchor.MiddleLeft, 13, 0, false);
@@ -525,9 +526,10 @@ namespace PacificRimUI.Editor
             CreateAccentBar(dialogGo.transform, "Dialog_LeftAccent", true, 3.5f, PacificRimUITheme.BlueBright);
 
             bool isPitfall = SceneManager.GetActiveScene().name.IndexOf("Operation Pitfall", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool isOtachi = SceneManager.GetActiveScene().name.IndexOf("Otachi", StringComparison.OrdinalIgnoreCase) >= 0;
 
             var subTxt = CreateStyledText("Pause_Subtitle", dialogGo.transform, PacificRimTextStyle.Caption,
-                isPitfall ? "OP 02  ·  OPERATION PITFALL" : "OP 01  ·  SAVE STRIKER EUREKA",
+                isPitfall ? "OP 03  ·  OPERATION PITFALL" : (isOtachi ? "OP 02  ·  OTACHI ARENA" : "OP 01  ·  SAVE STRIKER EUREKA"),
                 PacificRimUITheme.TextDim, TextAnchor.MiddleCenter, 11, 0, true);
             SetAnchorTop(subTxt.rectTransform, 0f, -20f, 380f, 18f);
 
@@ -723,9 +725,14 @@ namespace PacificRimUI.Editor
             cardLevel1.SetSelected(true);
 
             var cardLevel2 = CreateFeatureCard("Card_Level2", cardsContainer.transform, 0f, 0f, 96f,
-                "02  ·  MARIANA TRENCH", "OPERATION PITFALL", "Solo Mission · Cat V Slattern", "SELECT", PacificRimUITheme.TextDim);
+                "02  ·  HONG KONG CORE", "OTACHI ARENA", "Category IV Otachi · Neon City", "SELECT", PacificRimUITheme.TextDim);
             var le2 = cardLevel2.GetComponent<LayoutElement>() ?? cardLevel2.gameObject.AddComponent<LayoutElement>();
             le2.preferredHeight = 96f;
+
+            var cardLevel3 = CreateFeatureCard("Card_Level3", cardsContainer.transform, 0f, 0f, 96f,
+                "03  ·  MARIANA TRENCH", "OPERATION PITFALL", "Solo Mission · Cat V Slattern", "SELECT", PacificRimUITheme.TextDim);
+            var le3 = cardLevel3.GetComponent<LayoutElement>() ?? cardLevel3.gameObject.AddComponent<LayoutElement>();
+            le3.preferredHeight = 96f;
 
             // 4. Footer Rule & Minimal Prompts
             var footerRule = CreateRect("Menu_BottomRule", visualsRoot.transform, new Vector2(0.04f, 0f), new Vector2(0.96f, 0f), new Vector2(0f, 60f), new Vector2(0f, 14f));
@@ -757,7 +764,7 @@ namespace PacificRimUI.Editor
             SetSerializedField(mainMenu, "hudRoot", hudRoot);
             SetSerializedField(mainMenu, "tabBar", tabBar);
             SetSerializedField(mainMenu, "tabPanels", new[] { panelOperation, panelControls, panelChassis, panelAudio });
-            SetSerializedField(mainMenu, "featureCards", new[] { cardLevel1, cardLevel2 });
+            SetSerializedField(mainMenu, "featureCards", new[] { cardLevel1, cardLevel2, cardLevel3 });
             SetSerializedField(mainMenu, "deployButton", deployBtn);
             SetSerializedField(mainMenu, "controlsButton", controlsBtn);
             SetSerializedField(mainMenu, "exitButton", exitBtn);

@@ -219,7 +219,9 @@ namespace PacificRimWater
             // Track Kaiju position and velocity for reactive titan water displacement
             if (kaijuTransform == null)
             {
-                var kaijuGo = GameObject.Find("Kaiju_Leatherback");
+                var kaijuGo = GameObject.Find("Kaiju_Leatherback")
+                              ?? (KaijuAI.Instance != null ? KaijuAI.Instance.gameObject : null)
+                              ?? FindAnyObjectByType<KaijuAI>()?.gameObject;
                 if (kaijuGo != null)
                 {
                     kaijuTransform = kaijuGo.transform;

@@ -29,6 +29,8 @@ namespace PacificRimWater
         public float followDamping = 6f;
         [Tooltip("Smooth rotation lag factor.")]
         public float rotationDamping = 5f;
+        [Tooltip("Prevent camera from clipping inside visible buildings/structures in tight urban arenas.")]
+        public bool preventEnvironmentClipping = false;
 
         [Header("Field of View")]
         [Tooltip("Base field of view in degrees.")]
@@ -285,17 +287,53 @@ namespace PacificRimWater
             Vector3 orbitCenter = target.position + targetOffset + (yawRotation * Vector3.right * effectiveShoulderOffset) + (isFreeCam ? Vector3.zero : Vector3.up * height);
             Vector3 desiredPosition = orbitCenter - (targetRotation * Vector3.forward * effectiveDistance);
 
+            if (preventEnvironmentClipping && !isFreeCam)
+            {
+                Vector3 castOrigin = target.position + targetOffset;
+                Vector3 toCam = desiredPosition - castOrigin;
+                float castDist = toCam.magnitude;
+                if (castDist > 0.5f)
+                {
+                    Vector3 castDir = toCam / castDist;
+                    RaycastHit[] camHits = Physics.SphereCastAll(castOrigin, 0.65f, castDir, castDist, ~0, QueryTriggerInteraction.Ignore);
+                    float closestDist = castDist;
+                    for (int i = 0; i < camHits.Length; i++)
+                    {
+                        Collider c = camHits[i].collider;
+                        if (c == null || c.transform.IsChildOf(target)) continue;
+                        if (c.CompareTag("Ground") || c.GetComponentInParent<KaijuAI>() != null) continue;
+                        string cname = c.gameObject.name;
+                        if (cname.StartsWith("Collateral_") || cname.StartsWith("NeonSign_") || cname.StartsWith("Cantilever_") ||
+                            cname.StartsWith("Beam_") || cname.StartsWith("Cloud_") || cname.StartsWith("Overpass_") ||
+                            cname.StartsWith("Tram_") || cname.StartsWith("Tanker_") || cname.StartsWith("Scaffold_") ||
+                            cname.StartsWith("Flyover_") || cname.StartsWith("Billboard_") || cname.StartsWith("AlleyBlocker_") ||
+                            cname.StartsWith("City_Skybridge")) continue;
+                        if (c.GetComponentInChildren<MeshRenderer>() == null && c.GetComponent<MeshRenderer>() == null) continue;
+                        if (camHits[i].distance < closestDist)
+                        {
+                            closestDist = camHits[i].distance;
+                        }
+                    }
+                    if (closestDist < castDist)
+                    {
+                        float clamped = Mathf.Max(5.0f, closestDist - 0.65f);
+                        desiredPosition = castOrigin + castDir * clamped;
+                    }
+                }
+            }
+
             if (!isFreeCam)
             {
+                float minCameraY = 1.5f;
                 if (WaterSystem.Instance != null)
                 {
-                    float minCameraY = WaterSystem.Instance.transform.position.y + 2.2f;
-                    desiredPosition.y = Mathf.Max(desiredPosition.y, minCameraY);
+                    minCameraY = Mathf.Max(minCameraY, WaterSystem.Instance.transform.position.y + 2.2f);
                 }
-                else
+                if (WaterSystem.IsDryLandAt(desiredPosition, out float dryCamGroundY))
                 {
-                    desiredPosition.y = Mathf.Max(desiredPosition.y, 1.5f);
+                    minCameraY = Mathf.Max(minCameraY, dryCamGroundY + 2.0f);
                 }
+                desiredPosition.y = Mathf.Max(desiredPosition.y, minCameraY);
             }
             else
             {

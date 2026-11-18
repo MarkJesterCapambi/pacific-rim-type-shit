@@ -13,9 +13,11 @@ namespace PacificRimUI.Editor
     {
         public const string MainMenuScenePath = "Assets/Scenes/MainMenuScene.unity";
         public const string Level1ScenePath = "Assets/Scenes/Save Striker Eureka.unity";
-        public const string Level2ScenePath = "Assets/Scenes/Operation Pitfall.unity";
-        public const string Level2CutsceneScenePath = "Assets/Scenes/Operation Pitfall Cutscene.unity";
+        public const string Level2ScenePath = "Assets/Scenes/Otachi Arena.unity";
+        public const string Level3ScenePath = "Assets/Scenes/Operation Pitfall.unity";
+        public const string Level3CutsceneScenePath = "Assets/Scenes/Operation Pitfall Cutscene.unity";
         public const string AnteverseScenePath = "Assets/Scenes/The Anteverse.unity";
+        public const string CityHighwayScenePath = "Assets/Scenes/Hong Kong Neon Highway.unity";
         public const string GameplayScenePath = Level1ScenePath;
         public const string GameplaySceneName = MainMenuUI.Level1SceneName;
         public const string MainMenuSceneName = "MainMenuScene";
@@ -252,20 +254,28 @@ namespace PacificRimUI.Editor
                 new EditorBuildSettingsScene(MainMenuScenePath, true),
                 new EditorBuildSettingsScene(Level1ScenePath, true)
             };
-            if (System.IO.File.Exists(Level2CutsceneScenePath))
-            {
-                scenes.Add(new EditorBuildSettingsScene(Level2CutsceneScenePath, true));
-            }
             if (System.IO.File.Exists(Level2ScenePath))
             {
                 scenes.Add(new EditorBuildSettingsScene(Level2ScenePath, true));
+            }
+            if (System.IO.File.Exists(Level3CutsceneScenePath))
+            {
+                scenes.Add(new EditorBuildSettingsScene(Level3CutsceneScenePath, true));
+            }
+            if (System.IO.File.Exists(Level3ScenePath))
+            {
+                scenes.Add(new EditorBuildSettingsScene(Level3ScenePath, true));
             }
             if (System.IO.File.Exists(AnteverseScenePath))
             {
                 scenes.Add(new EditorBuildSettingsScene(AnteverseScenePath, true));
             }
+            if (System.IO.File.Exists(CityHighwayScenePath))
+            {
+                scenes.Add(new EditorBuildSettingsScene(CityHighwayScenePath, true));
+            }
             EditorBuildSettings.scenes = scenes.ToArray();
-            Debug.Log("[PacificRimUI] Build Settings updated with MainMenuScene, Save Striker Eureka, Operation Pitfall Cutscene, Operation Pitfall, and The Anteverse.");
+            Debug.Log("[PacificRimUI] Build Settings updated: MainMenuScene, Save Striker Eureka (L1), Otachi Arena (L2), Operation Pitfall Cutscene, Operation Pitfall (L3), The Anteverse, Hong Kong Neon Highway.");
         }
 
         public static void ConfigureSampleSceneUI()

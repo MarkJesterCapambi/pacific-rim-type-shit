@@ -27,6 +27,7 @@ namespace PacificRimWater
 
         [Header("Placement & Timing")]
         public Transform followCenter;
+        public bool sheetLightningOnly = false;
         public float minStrikeInterval = 2.2f;
         public float maxStrikeInterval = 4.8f;
         public float boltDuration = 0.18f;
@@ -180,7 +181,7 @@ namespace PacificRimWater
             Vector3 center = followCenter != null ? followCenter.position : Vector3.zero;
             float baseAngle = Random.Range(0f, 360f);
 
-            if (boltMeshPool != null && boltMeshPool.Length > 0)
+            if (!sheetLightningOnly && boltMeshPool != null && boltMeshPool.Length > 0)
             {
                 for (int i = 0; i < boltMeshPool.Length; i++)
                 {
@@ -221,7 +222,7 @@ namespace PacificRimWater
                     // Close strikes trigger ocean splashes and radial waves
                     if (dist < 75f)
                     {
-                        if (WaterSplashManager.Instance != null)
+                        if (WaterSplashManager.Instance != null && !WaterSplashManager.Instance.isDryLandMode)
                         {
                             WaterSplashManager.Instance.SpawnFootstepSplash(strikePos, 2.2f);
                             WaterSplashManager.Instance.SpawnHeavyMoveWaterKickup(strikePos, Vector3.up, 2.2f, true);

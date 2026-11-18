@@ -54,6 +54,13 @@ namespace PacificRimEnvironment
         [Header("Audio")]
         public AudioSource rotorAudioSource;
 
+        [Header("Urban Canyon Avoidance")]
+        public bool avoidUrbanBuildings = false;
+        public float minUrbanClearanceY = 68f;
+        public float urbanAvoidRadius = 18f;
+        public Vector2 urbanBoundsMinXZ = new Vector2(-232f, -232f);
+        public Vector2 urbanBoundsMaxXZ = new Vector2(232f, 232f);
+
         private float currentOrbitAngle;
         private float bobPhaseOffset;
         private float noiseSeed;
@@ -188,6 +195,7 @@ namespace PacificRimEnvironment
                 currentY,
                 center.z + Mathf.Sin(currentOrbitAngle) * orbitRadius
             );
+            desiredPos = ApplyUrbanAvoidance(desiredPos);
 
             // Smooth position update
             transform.position = Vector3.Lerp(transform.position, desiredPos, dt * 7.5f);
@@ -244,6 +252,7 @@ namespace PacificRimEnvironment
             Vector3 desiredPos = (1f - smoothT) * (1f - smoothT) * transitionStartPos
                                + 2f * (1f - smoothT) * smoothT * midPoint
                                + smoothT * smoothT * targetEntryPos;
+            desiredPos = ApplyUrbanAvoidance(desiredPos);
 
             transform.position = Vector3.Lerp(transform.position, desiredPos, dt * 8.5f);
 
@@ -270,6 +279,50 @@ namespace PacificRimEnvironment
                 flightAltitude = targetFlightAltitude;
                 currentOrbitAngle = approachAngle;
             }
+        }
+
+        private Vector3 ApplyUrbanAvoidance(Vector3 candidatePos)
+        {
+            if (!avoidUrbanBuildings) return candidatePos;
+
+            candidatePos.x = Mathf.Clamp(candidatePos.x, urbanBoundsMinXZ.x, urbanBoundsMaxXZ.x);
+            candidatePos.z = Mathf.Clamp(candidatePos.z, urbanBoundsMinXZ.y, urbanBoundsMaxXZ.y);
+            candidatePos.y = Mathf.Max(candidatePos.y, minUrbanClearanceY);
+
+            Collider[] nearby = Physics.OverlapSphere(candidatePos, urbanAvoidRadius, LayerMask.GetMask("Default"), QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < nearby.Length; i++)
+            {
+                Collider col = nearby[i];
+                if (col == null || col.CompareTag("Ground")) continue;
+                if (col.GetComponentInParent<SimpleJaegerController>() != null ||
+                    col.GetComponentInParent<KaijuAI>() != null ||
+                    col.GetComponentInParent<ChinookCombatPatrolAgent>() != null) continue;
+
+                Vector3 closest = col.ClosestPoint(candidatePos);
+                Vector3 away = candidatePos - closest;
+                float dist = away.magnitude;
+                if (dist >= urbanAvoidRadius) continue;
+
+                float roofY = col.bounds.max.y;
+                if (roofY <= candidatePos.y + 18f)
+                {
+                    candidatePos.y = Mathf.Max(candidatePos.y, roofY + 10f);
+                }
+
+                Vector3 horiz = new Vector3(away.x, 0f, away.z);
+                if (horiz.sqrMagnitude < 0.01f)
+                {
+                    horiz = new Vector3(candidatePos.x - col.bounds.center.x, 0f, candidatePos.z - col.bounds.center.z);
+                }
+                if (horiz.sqrMagnitude < 0.01f) horiz = Vector3.forward;
+
+                candidatePos += horiz.normalized * (urbanAvoidRadius - dist) * 1.35f;
+            }
+
+            candidatePos.x = Mathf.Clamp(candidatePos.x, urbanBoundsMinXZ.x, urbanBoundsMaxXZ.x);
+            candidatePos.z = Mathf.Clamp(candidatePos.z, urbanBoundsMinXZ.y, urbanBoundsMaxXZ.y);
+            candidatePos.y = Mathf.Max(candidatePos.y, minUrbanClearanceY);
+            return candidatePos;
         }
 
         private void UpdateSearchlightGimbal(float dt)

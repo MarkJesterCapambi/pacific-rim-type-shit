@@ -12,8 +12,10 @@ namespace PacificRimUI
         public static bool IsMenuOpen => Instance != null && Instance.isMenuOpen;
 
         public const string Level1SceneName = "Save Striker Eureka";
-        public const string Level2SceneName = "Operation Pitfall";
-        public const string Level2CutsceneSceneName = "Operation Pitfall Cutscene";
+        public const string Level2SceneName = "Otachi Arena";
+        public const string Level3SceneName = "Operation Pitfall";
+        public const string Level3CutsceneSceneName = "Operation Pitfall Cutscene";
+        public const string CityHighwaySceneName = "Hong Kong Neon Highway";
 
         [Header("Scene Routing")]
         [Tooltip("True if this menu is running in the dedicated Main Menu scene.")]
@@ -22,7 +24,7 @@ namespace PacificRimUI
         public string gameplaySceneName = Level1SceneName;
         [Tooltip("Scene loaded when returning to the Main Menu.")]
         public string mainMenuSceneName = "MainMenuScene";
-        [Tooltip("0 = Save Striker Eureka, 1 = Operation Pitfall")]
+        [Tooltip("0 = Save Striker Eureka, 1 = Otachi Arena, 2 = Operation Pitfall")]
         public int selectedMissionIndex = 0;
 
         [Header("Canvas & Paneling")]
@@ -116,6 +118,8 @@ namespace PacificRimUI
             else
             {
                 bool isPitfall = IsOperationPitfallActive();
+                bool isOtachi = IsOtachiArenaActive();
+                bool isCity = IsCityHighwayActive();
                 isMenuOpen = false;
                 SetMenuState(false);
                 if (deployButton != null)
@@ -132,16 +136,16 @@ namespace PacificRimUI
                 }
                 if (pauseSubtitleText != null)
                 {
-                    pauseSubtitleText.text = isPitfall
-                        ? "OP 02  ·  OPERATION PITFALL"
-                        : "OP 01  ·  SAVE STRIKER EUREKA";
+                    pauseSubtitleText.text = isCity
+                        ? "OP 01  ·  HONG KONG NEON HIGHWAY"
+                        : (isPitfall ? "OP 03  ·  OPERATION PITFALL" : (isOtachi ? "OP 02  ·  OTACHI ARENA" : "OP 01  ·  SAVE STRIKER EUREKA"));
                 }
                 if (jaegerHud != null)
                 {
                     jaegerHud.ShowBanner(
-                        isPitfall
-                            ? "OPERATION PITFALL // ENGAGE SLATTERN"
-                            : "SAVE STRIKER EUREKA // ENGAGE LEATHERBACK",
+                        isCity
+                            ? "HONG KONG NEON HIGHWAY // ENGAGE LEATHERBACK"
+                            : (isPitfall ? "OPERATION PITFALL // ENGAGE SLATTERN" : (isOtachi ? "OTACHI ARENA // ENGAGE OTACHI" : "SAVE STRIKER EUREKA // ENGAGE LEATHERBACK")),
                         3.5f);
                 }
             }
@@ -314,12 +318,33 @@ namespace PacificRimUI
         private bool IsOperationPitfallActive()
         {
             if (isMainMenuScene)
-                return selectedMissionIndex == 1;
+                return selectedMissionIndex == 2;
             string sceneName = SceneManager.GetActiveScene().name;
             if (!string.IsNullOrEmpty(sceneName) && sceneName.IndexOf("Operation Pitfall", System.StringComparison.OrdinalIgnoreCase) >= 0)
                 return true;
             var kaiju = PacificRimWater.KaijuAI.Instance;
             return kaiju != null && kaiju.isSlattern;
+        }
+
+        private bool IsOtachiArenaActive()
+        {
+            if (isMainMenuScene)
+                return selectedMissionIndex == 1;
+            string sceneName = SceneManager.GetActiveScene().name;
+            if (!string.IsNullOrEmpty(sceneName) && sceneName.IndexOf("Otachi", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            var kaiju = PacificRimWater.KaijuAI.Instance;
+            return kaiju != null && kaiju.isOtachi;
+        }
+
+        private bool IsCityHighwayActive()
+        {
+            if (isMainMenuScene)
+                return false;
+            string sceneName = SceneManager.GetActiveScene().name;
+            return !string.IsNullOrEmpty(sceneName) &&
+                   (sceneName.IndexOf("Hong Kong", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    sceneName.IndexOf("Neon", System.StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         public void SetDefeatState()
@@ -328,6 +353,8 @@ namespace PacificRimUI
             isDefeated = true;
             SetMenuState(true);
             bool isPitfall = IsOperationPitfallActive();
+            bool isOtachi = IsOtachiArenaActive();
+            bool isCity = IsCityHighwayActive();
 
             if (deployButton != null)
             {
@@ -345,7 +372,9 @@ namespace PacificRimUI
             }
             if (pauseSubtitleText != null)
             {
-                pauseSubtitleText.text = isPitfall ? "OP 02  ·  OPERATION PITFALL" : "OP 01  ·  SAVE STRIKER EUREKA";
+                pauseSubtitleText.text = isCity
+                    ? "OP 01  ·  HONG KONG NEON HIGHWAY"
+                    : (isPitfall ? "OP 03  ·  OPERATION PITFALL" : (isOtachi ? "OP 02  ·  OTACHI ARENA" : "OP 01  ·  SAVE STRIKER EUREKA"));
                 pauseSubtitleText.color = PacificRimUITheme.TextDim;
             }
             if (pauseHealthText != null)
@@ -355,7 +384,9 @@ namespace PacificRimUI
             }
             if (pauseMissionText != null)
             {
-                pauseMissionText.text = isPitfall ? "LOST TO SLATTERN" : "STRIKER EUREKA LOST";
+                pauseMissionText.text = isCity
+                    ? "HONG KONG HIGHWAY LOST"
+                    : (isPitfall ? "LOST TO SLATTERN" : (isOtachi ? "LOST TO OTACHI" : "STRIKER EUREKA LOST"));
                 pauseMissionText.color = PacificRimUITheme.TextDim;
             }
         }
@@ -366,6 +397,8 @@ namespace PacificRimUI
             isVictorious = true;
             SetMenuState(true);
             bool isPitfall = IsOperationPitfallActive();
+            bool isOtachi = IsOtachiArenaActive();
+            bool isCity = IsCityHighwayActive();
 
             if (deployButton != null)
             {
@@ -393,9 +426,11 @@ namespace PacificRimUI
             }
             if (pauseSubtitleText != null)
             {
-                pauseSubtitleText.text = isPitfall
-                    ? "SLATTERN NEUTRALIZED  ·  BREACH SECURED"
-                    : "LEATHERBACK NEUTRALIZED  ·  STRIKER SAVED";
+                pauseSubtitleText.text = isCity
+                    ? "LEATHERBACK NEUTRALIZED  ·  CITY DEFENDED"
+                    : (isPitfall
+                        ? "SLATTERN NEUTRALIZED  ·  BREACH SECURED"
+                        : (isOtachi ? "OTACHI NEUTRALIZED  ·  SECTOR SECURED" : "LEATHERBACK NEUTRALIZED  ·  STRIKER SAVED"));
                 pauseSubtitleText.color = PacificRimUITheme.Success;
             }
             if (pauseHealthText != null)
@@ -462,6 +497,8 @@ namespace PacificRimUI
                         deployButton.onClick = OnDeployClicked;
                     }
                     bool isPitfall = IsOperationPitfallActive();
+                    bool isOtachi = IsOtachiArenaActive();
+                    bool isCity = IsCityHighwayActive();
                     if (pauseTitleText != null)
                     {
                         pauseTitleText.text = isMainMenuScene ? "Pacific Rim: Operation Pitfall" : "PAUSED";
@@ -470,8 +507,8 @@ namespace PacificRimUI
                     if (pauseSubtitleText != null)
                     {
                         pauseSubtitleText.text = isMainMenuScene
-                            ? (selectedMissionIndex == 1 ? "02 · OPERATION PITFALL" : "01 · SAVE STRIKER EUREKA")
-                            : (isPitfall ? "OP 02  ·  OPERATION PITFALL" : "OP 01  ·  SAVE STRIKER EUREKA");
+                            ? (selectedMissionIndex == 2 ? "03 · OPERATION PITFALL" : (selectedMissionIndex == 1 ? "02 · OTACHI ARENA" : "01 · SAVE STRIKER EUREKA"))
+                            : (isCity ? "OP 01  ·  HONG KONG NEON HIGHWAY" : (isPitfall ? "OP 03  ·  OPERATION PITFALL" : (isOtachi ? "OP 02  ·  OTACHI ARENA" : "OP 01  ·  SAVE STRIKER EUREKA")));
                         pauseSubtitleText.color = PacificRimUITheme.TextDim;
                     }
                 }
@@ -511,7 +548,7 @@ namespace PacificRimUI
         {
             if (isMainMenuScene)
             {
-                if (index == 0 || index == 1)
+                if (index >= 0 && index <= 2)
                 {
                     bool alreadySelected = selectedMissionIndex == index;
                     SelectMission(index, playSound: true);
@@ -526,12 +563,12 @@ namespace PacificRimUI
                     return;
                 }
 
-                if (index == 2)
+                if (index == 3)
                 {
                     OnControlsClicked();
                     return;
                 }
-                if (index == 3)
+                if (index == 4)
                 {
                     OnSpecsClicked();
                     return;
@@ -555,8 +592,10 @@ namespace PacificRimUI
 
         public void SelectMission(int missionIndex, bool playSound = true)
         {
-            selectedMissionIndex = Mathf.Clamp(missionIndex, 0, 1);
-            gameplaySceneName = selectedMissionIndex == 1 ? Level2SceneName : Level1SceneName;
+            selectedMissionIndex = Mathf.Clamp(missionIndex, 0, 2);
+            gameplaySceneName = selectedMissionIndex == 2
+                ? Level3SceneName
+                : (selectedMissionIndex == 1 ? Level2SceneName : Level1SceneName);
 
             if (playSound)
             {
@@ -568,9 +607,11 @@ namespace PacificRimUI
                 for (int i = 0; i < featureCards.Length; i++)
                 {
                     if (featureCards[i] == null) continue;
+                    if (!featureCards[i].gameObject.activeSelf)
+                        featureCards[i].gameObject.SetActive(true);
                     bool isSelectedMission = (i == selectedMissionIndex);
                     featureCards[i].SetSelected(isSelectedMission);
-                    if (i == 0 || i == 1)
+                    if (i >= 0 && i <= 2)
                     {
                         featureCards[i].SetBadge(
                             isSelectedMission ? "ACTIVE" : "SELECT",
@@ -581,38 +622,45 @@ namespace PacificRimUI
 
             if (deployButton != null)
             {
-                deployButton.SetText(selectedMissionIndex == 1 ? "DEPLOY  ·  OP 02" : "DEPLOY  ·  OP 01");
+                deployButton.SetText(
+                    selectedMissionIndex == 2
+                        ? "DEPLOY  ·  OP 03"
+                        : (selectedMissionIndex == 1 ? "DEPLOY  ·  OP 02" : "DEPLOY  ·  OP 01"));
             }
 
             ResolveMainMenuTextReferences();
 
             if (menuMainSubtitleText != null)
             {
-                menuMainSubtitleText.text = selectedMissionIndex == 1
-                    ? "02  ·  OPERATION PITFALL"
-                    : "01  ·  SAVE STRIKER EUREKA";
-                menuMainSubtitleText.color = selectedMissionIndex == 1 ? PacificRimUITheme.BlueBright : PacificRimUITheme.Amber;
+                menuMainSubtitleText.text = selectedMissionIndex == 2
+                    ? "03  ·  OPERATION PITFALL"
+                    : (selectedMissionIndex == 1 ? "02  ·  OTACHI ARENA" : "01  ·  SAVE STRIKER EUREKA");
+                menuMainSubtitleText.color = selectedMissionIndex == 0
+                    ? PacificRimUITheme.Amber
+                    : (selectedMissionIndex == 1 ? PacificRimUITheme.Success : PacificRimUITheme.BlueBright);
             }
 
             if (briefingText != null)
             {
-                briefingText.text = selectedMissionIndex == 1
+                briefingText.text = selectedMissionIndex == 2
                     ? "Deploy solo to the Mariana Trench, defeat Cat V Slattern, and seal the Breach."
-                    : "Protect paralyzed Striker Eureka from Category IV Leatherback in Hong Kong Bay.";
+                    : (selectedMissionIndex == 1
+                        ? "Intercept Category IV stalker Otachi in rain-lashed Hong Kong City Center streets and neutralize her corrosive threat."
+                        : "Protect paralyzed Striker Eureka from Category IV Leatherback in Hong Kong Bay.");
             }
 
             if (opRowTitleValue != null)
             {
-                opRowTitleValue.text = selectedMissionIndex == 1
+                opRowTitleValue.text = selectedMissionIndex == 2
                     ? "MARIANA TRENCH"
-                    : "HONG KONG BAY";
+                    : (selectedMissionIndex == 1 ? "HONG KONG CORE" : "HONG KONG BAY");
             }
 
             if (opRowThreatValue != null)
             {
-                opRowThreatValue.text = selectedMissionIndex == 1
+                opRowThreatValue.text = selectedMissionIndex == 2
                     ? "CAT V SLATTERN"
-                    : "CAT IV LEATHERBACK";
+                    : (selectedMissionIndex == 1 ? "CAT IV OTACHI" : "CAT IV LEATHERBACK");
             }
 
             UpdateBestTimeDisplay();
@@ -639,8 +687,9 @@ namespace PacificRimUI
             if (isMainMenuScene)
             {
                 PacificRimUISound.PlaySuccess();
+                PacificRimCutscene.HarborToNeonTransitionState.ClearAll();
                 Time.timeScale = 1f;
-                string targetScene = selectedMissionIndex == 1 ? Level2CutsceneSceneName : gameplaySceneName;
+                string targetScene = selectedMissionIndex == 2 ? Level3CutsceneSceneName : gameplaySceneName;
                 PacificRimLoadingScreen.LoadScene(targetScene);
             }
             else
@@ -701,8 +750,12 @@ namespace PacificRimUI
         public void OnNextLevelClicked()
         {
             PacificRimUISound.PlaySuccess();
+            PacificRimCutscene.HarborToNeonTransitionState.ClearAll();
             Time.timeScale = 1f;
-            PacificRimLoadingScreen.LoadScene(Level2CutsceneSceneName);
+            if (IsOtachiArenaActive())
+                PacificRimLoadingScreen.LoadScene(Level3CutsceneSceneName);
+            else
+                PacificRimLoadingScreen.LoadScene(Level2SceneName);
         }
 
         public void OnRestartClicked()
@@ -715,6 +768,7 @@ namespace PacificRimUI
         public void OnReturnToMenuClicked()
         {
             PacificRimUISound.Play(PacificRimUISound.SoundType.Back);
+            PacificRimCutscene.HarborToNeonTransitionState.ClearAll();
             Time.timeScale = 1f;
             PacificRimLoadingScreen.LoadScene(mainMenuSceneName);
         }
@@ -749,9 +803,10 @@ namespace PacificRimUI
             float bestSeconds = PacificRimCombatRecords.GetBestTime(targetLevel);
             string bestStr = PacificRimCombatRecords.FormatTime(bestSeconds);
 
+            string sectorLabel = selectedMissionIndex == 2 ? "SECTOR 09" : (selectedMissionIndex == 1 ? "SECTOR 05" : "SECTOR 04");
+
             if (menuBestTimeText != null)
             {
-                string sectorLabel = selectedMissionIndex == 1 ? "SECTOR 09" : "SECTOR 04";
                 menuBestTimeText.text = $"{sectorLabel}  ·  BEST {bestStr}";
                 menuBestTimeText.color = PacificRimUITheme.Amber;
             }
@@ -767,7 +822,6 @@ namespace PacificRimUI
                 var sectorTxt = menuVisualsRoot.transform.Find("Top_TabBar/SectorStatus")?.GetComponent<UnityEngine.UI.Text>();
                 if (sectorTxt != null)
                 {
-                    string sectorLabel = selectedMissionIndex == 1 ? "SECTOR 09" : "SECTOR 04";
                     sectorTxt.text = $"{sectorLabel}  ·  BEST {bestStr}";
                 }
 

@@ -775,7 +775,7 @@ namespace PacificRimWater.Editor
             if (mainMenu != null)
             {
                 mainMenu.isMainMenuScene = false;
-                mainMenu.gameplaySceneName = MainMenuUI.Level2SceneName;
+                mainMenu.gameplaySceneName = MainMenuUI.Level3SceneName;
                 mainMenu.mainMenuSceneName = "MainMenuScene";
                 mainMenu.isMenuOpen = false;
                 mainMenu.SetMenuState(false);

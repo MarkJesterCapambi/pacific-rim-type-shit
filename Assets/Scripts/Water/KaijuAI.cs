@@ -38,7 +38,12 @@ namespace PacificRimWater
             HeavySlam,
             SprintChargeSlam,
             AbyssalDartStrike,
-            DeviousBlitzLightCombo
+            DeviousBlitzLightCombo,
+            OtachiStalkerLungeCombo,
+            OtachiFrenzyFlankCombo,
+            OtachiTailWhipPunish,
+            OtachiAcidSpraySweep,
+            OtachiDiveBomberRush
         }
 
         private const float PunchClipLength = 0.97f;
@@ -56,12 +61,20 @@ namespace PacificRimWater
         private const float SlatternStaggerClipLength = 2.76f;
         private const float SlatternDeathClipLength = 5.16f;
 
-        private float ActivePunchClipLength => isSlattern ? SlatternPunchClipLength : PunchClipLength;
-        private float ActiveSlamClipLength => isSlattern ? SlatternSlamClipLength : SlamClipLength;
-        private float ActiveEmpClipLength => isSlattern ? SlatternEmpClipLength : EmpClipLength;
-        private float PunchLeftImpactTime => isSlattern ? 1.01f : 0.867f;
-        private float PunchRightImpactTime => isSlattern ? 0.91f : 0.767f;
-        private float SlamImpactTime => isSlattern ? 1.50f : 1.033f;
+        // Otachi FBX animation clip lengths and exact peak extension/impact timestamps (measured from Otachi.fbx)
+        private const float OtachiPunchClipLength = 0.967f;
+        private const float OtachiSlamClipLength = 1.300f;
+        private const float OtachiEmpClipLength = 2.633f;
+        private const float OtachiStaggerSideClipLength = 1.967f;
+        private const float OtachiStaggerUpDownClipLength = 1.300f;
+        private const float OtachiDeathClipLength = 4.300f;
+
+        private float ActivePunchClipLength => isSlattern ? SlatternPunchClipLength : (isOtachi ? OtachiPunchClipLength : PunchClipLength);
+        private float ActiveSlamClipLength => isSlattern ? SlatternSlamClipLength : (isOtachi ? OtachiSlamClipLength : SlamClipLength);
+        private float ActiveEmpClipLength => isSlattern ? SlatternEmpClipLength : (isOtachi ? OtachiEmpClipLength : EmpClipLength);
+        private float PunchLeftImpactTime => isSlattern ? 1.01f : (isOtachi ? 0.822f : 0.867f);
+        private float PunchRightImpactTime => isSlattern ? 0.91f : (isOtachi ? 0.854f : 0.767f);
+        private float SlamImpactTime => isSlattern ? 1.50f : (isOtachi ? 1.213f : 1.033f);
 
         private static readonly int LocomotionSpeedHash = Animator.StringToHash("LocomotionSpeed");
 
@@ -69,7 +82,8 @@ namespace PacificRimWater
         public string kaijuDisplayName = "LEATHERBACK";
         public string kaijuCategoryLabel = "CATEGORY IV KAIJU";
         public bool isSlattern = false;
-        [Tooltip("Vertical root offset above ground raycast hit (2.0m for Leatherback, auto-calibrated for Slattern).")]
+        public bool isOtachi = false;
+        [Tooltip("Vertical root offset above ground raycast hit (2.0m for Leatherback, auto-calibrated for Slattern/Otachi).")]
         public float groundYOffset = 2.0f;
 
         [Header("Target & References")]
@@ -99,6 +113,12 @@ namespace PacificRimWater
         [Range(0f, 1f)] public float slatternPhase3ParryChance = 0.10f;
         public float slatternStalkMinDist = 33f;
         public float slatternStalkIdealDist = 44f;
+
+        [Header("Otachi Hit-and-Run Stalker Profile")]
+        public float otachiStalkMinDist = 24f;
+        public float otachiStalkIdealDist = 33f;
+        public float otachiAcidPoolInterval = 1.15f;
+        public bool otachiRetreatAcidEnabled = true;
 
         [Header("Locomotion & Combat Ranges")]
         [Tooltip("Allow Leatherback to sprint during normal combat/retreats. When false, he only sprints if the player runs too far away.")]
@@ -185,6 +205,12 @@ namespace PacificRimWater
                     if (CurrentPhase == 2) return "PHASE II // APEX PARRY BLITZER";
                     return "PHASE I // ABYSSAL DISTANCE FIGHTER";
                 }
+                if (isOtachi)
+                {
+                    if (CurrentPhase == 3) return "PHASE III // AIRBORNE DIVE-BOMBER";
+                    if (CurrentPhase == 2) return "PHASE II // ACID LOCKDOWN";
+                    return "PHASE I // THE SKIRMISHER";
+                }
                 if (CurrentPhase == 3) return $"PHASE III // {kaijuCategoryLabel} BERSERKER";
                 if (CurrentPhase == 2) return "PHASE II // BIO-EMP OVERDRIVE";
                 return "PHASE I // APEX STALKER";
@@ -208,6 +234,19 @@ namespace PacificRimWater
                         return "DISTANCE ZONER // STALKING IN FOG";
                     if (CurrentPhase == 2 && (currentState == AIState.Retreating || currentState == AIState.SizingUp || isStrafingInRange))
                         return "BLITZER // READY TO PARRY";
+                }
+                if (isOtachi)
+                {
+                    if (activePattern == AttackPattern.OtachiDiveBomberRush)
+                        return otachiInDiveBombAttempt ? "DIVE-BOMBER // DASH > FLURRY > SLAM" : "DIVE-BOMBER // FEINT DASH-BACK";
+                    if (activePattern == AttackPattern.OtachiAcidSpraySweep) return "ACID LOCKDOWN // SWEEPING SPRAY";
+                    if (activePattern == AttackPattern.OtachiTailWhipPunish) return "TAIL WHIP PUNISH";
+                    if (activePattern == AttackPattern.OtachiFrenzyFlankCombo) return "APEX FLURRY // RAPID CLAW COMBO";
+                    if (activePattern == AttackPattern.OtachiStalkerLungeCombo) return "SKIRMISH LUNGE // MULTI-HIT";
+                    if (currentState == AIState.Retreating) return "BACK-DASH // ACID TRAIL";
+                    if (currentState == AIState.EmpRoar) return "ACID SHOT TELEGRAPH";
+                    if (IsEmpBuffed) return "VENOM OVERDRIVE // EVASIVE";
+                    if (currentState == AIState.SizingUp || isStrafingInRange) return "KEEP-AWAY SKIRMISHER";
                 }
                 if (IsBlocking) return "ARMORED FORE-GUARD";
                 if (currentState == AIState.Retreating) return retreatWithSprint ? "EVASIVE BACK-SPRINT" : "TACTICAL RETREAT";
@@ -250,6 +289,16 @@ namespace PacificRimWater
         private bool hasCelebratedPlayerDefeat;
 
         private float slatternBlitzCooldown = 2.0f;
+        private float otachiLungeCooldown = 1.6f;
+        private float otachiAcidPoolTimer = 0f;
+        private float otachiAcidSprayCooldown = 5.5f;
+        private float otachiTailWhipCooldown = 0f;
+        private int otachiCloseRangeHits = 0;
+        private float otachiCloseRangeHitWindow = -10f;
+        private float otachiDiveElevation = 0f;
+        private bool otachiPhase3SlamInterrupted = false;
+        private bool otachiInDiveBombAttempt = false;
+        private bool otachiSlamCompletedThisRush = false;
         private bool isParryCountering;
         private bool isGuardBrokenStagger;
         private bool isDebugForcedActionActive;
@@ -284,6 +333,8 @@ namespace PacificRimWater
         private Transform ankleR;
         private Transform handL;
         private Transform handR;
+        private Transform mouthBone;
+        private Transform tailTipBone;
 
         // Procedural IK smoothing state
         private float currentStrafeYaw;
@@ -488,6 +539,11 @@ namespace PacificRimWater
             deathLoopEntered = false;
             hasCelebratedPlayerDefeat = false;
             consecutiveStaggers = 0;
+            otachiPhase3SlamInterrupted = false;
+            otachiInDiveBombAttempt = false;
+            otachiSlamCompletedThisRush = false;
+            otachiCloseRangeHits = 0;
+            otachiDiveElevation = 0f;
             IsTimeFrozen = false;
             CurrentPhase = 1;
             currentHealth = maxHealth;
@@ -591,11 +647,28 @@ namespace PacificRimWater
                         if (handL == null || t.name == "HandBone.L" || t.name == "PalmBone.L")
                             handL = t;
                         break;
+                    case "Finger.L":
+                    case "LowerArm.L":
+                        if (handL == null || t.name == "Finger.L")
+                            handL = t;
+                        break;
                     case "HandBone.R":
                     case "PalmBone.R":
                     case "Wrist.R":
                         if (handR == null || t.name == "HandBone.R" || t.name == "PalmBone.R")
                             handR = t;
+                        break;
+                    case "Finger.R":
+                    case "LowerArm.R":
+                        if (handR == null || t.name == "Finger.R")
+                            handR = t;
+                        break;
+                    case "UpperHead":
+                        mouthBone = t;
+                        break;
+                    case "Tail.005":
+                    case "TailBone.004":
+                        tailTipBone = t;
                         break;
                 }
             }
@@ -735,6 +808,24 @@ namespace PacificRimWater
                 slatternBlitzCooldown -= dt * cdRate;
             }
 
+            if (otachiLungeCooldown > 0f && currentState != AIState.Attacking)
+            {
+                float oRate = CurrentPhase >= 3 ? 1.45f : (CurrentPhase == 2 ? 1.22f : 1.0f);
+                otachiLungeCooldown -= dt * oRate;
+            }
+            if (otachiAcidSprayCooldown > 0f && currentState != AIState.Attacking)
+            {
+                otachiAcidSprayCooldown -= dt * (CurrentPhase >= 3 ? 1.25f : 1.0f);
+            }
+            if (otachiTailWhipCooldown > 0f)
+            {
+                otachiTailWhipCooldown -= dt;
+            }
+            if (Time.time - otachiCloseRangeHitWindow > 2.8f)
+            {
+                otachiCloseRangeHits = 0;
+            }
+
             strafeSwitchTimer -= dt;
             if (strafeSwitchTimer <= 0f)
             {
@@ -811,7 +902,70 @@ namespace PacificRimWater
 
             UpdateAnimatorPlaybackSpeed();
             UpdateStateMachine(dt);
+            ApplyCityWallAvoidance();
             TrackFootsteps();
+        }
+
+        private void ApplyCityWallAvoidance()
+        {
+            if (desiredVelocity.sqrMagnitude < 0.25f) return;
+            if (currentState != AIState.ChasingAndStrafing &&
+                currentState != AIState.SizingUp &&
+                currentState != AIState.Retreating)
+            {
+                return;
+            }
+
+            Vector3 flatVel = new Vector3(desiredVelocity.x, 0f, desiredVelocity.z);
+            float speed = flatVel.magnitude;
+            if (speed < 0.25f) return;
+
+            Vector3 dir = flatVel / speed;
+            Vector3 origin = transform.position + Vector3.up * 10f;
+            RaycastHit[] hits = Physics.SphereCastAll(origin, 5.2f, dir, 9.5f, LayerMask.GetMask("Default"), QueryTriggerInteraction.Ignore);
+
+            float closestDist = float.MaxValue;
+            Vector3 wallNormal = Vector3.zero;
+            bool foundWall = false;
+
+            for (int i = 0; i < hits.Length; i++)
+            {
+                Collider c = hits[i].collider;
+                if (c == null || c.transform.IsChildOf(transform)) continue;
+                if (targetJaeger != null && c.transform.IsChildOf(targetJaeger.transform)) continue;
+                if (c.CompareTag("Ground") || c.gameObject.name.Contains("Platform") || c.gameObject.name.Contains("Ramp")) continue;
+
+                Vector3 n = new Vector3(hits[i].normal.x, 0f, hits[i].normal.z);
+                if (n.sqrMagnitude < 0.01f) continue;
+                n.Normalize();
+                if (Vector3.Dot(dir, n) >= -0.05f) continue;
+
+                if (hits[i].distance < closestDist)
+                {
+                    closestDist = hits[i].distance;
+                    wallNormal = n;
+                    foundWall = true;
+                }
+            }
+
+            if (!foundWall) return;
+
+            if ((isStrafingInRange || currentState == AIState.SizingUp) && Time.time - lastWallStrafeFlipTime > 0.9f)
+            {
+                circleStrafeDir = -circleStrafeDir;
+                lastWallStrafeFlipTime = Time.time;
+            }
+
+            Vector3 slide = Vector3.ProjectOnPlane(flatVel, wallNormal);
+            if (slide.sqrMagnitude < 1.0f && targetJaeger != null)
+            {
+                Vector3 toJaeger = targetJaeger.transform.position - transform.position;
+                toJaeger.y = 0f;
+                Vector3 tangent = Vector3.ProjectOnPlane(toJaeger, wallNormal);
+                if (tangent.sqrMagnitude > 0.01f) slide = tangent.normalized * speed * 0.75f;
+            }
+
+            desiredVelocity = slide + wallNormal * 3.5f;
         }
 
         private float attentionTurnTimer = 0f;
@@ -819,6 +973,7 @@ namespace PacificRimWater
         private float? attentionOverrideYaw = null;
         private float attentionTurnSign = 1f;
         private bool isPursuitSprinting = false;
+        private float lastWallStrafeFlipTime = -10f;
         public bool IsAttentionTurning => attentionTurnTimer > 0f;
 
         public void SetCutscenePose(float yawDegrees)
@@ -890,6 +1045,8 @@ namespace PacificRimWater
                 if (animator != null) animator.speed = 0f;
                 if (rb != null)
                 {
+            if (rb.isKinematic) return;
+
 #if UNITY_6000_0_OR_NEWER
                     rb.linearVelocity = Vector3.zero;
 #else
@@ -940,6 +1097,14 @@ namespace PacificRimWater
             {
                 animator.speed = IsEmpBuffed ? 1.55f : 1.45f;
             }
+            else if (currentState == AIState.Attacking && isOtachi &&
+                     (activePattern == AttackPattern.OtachiFrenzyFlankCombo || activePattern == AttackPattern.OtachiStalkerLungeCombo))
+            {
+                float baseSpd = activePattern == AttackPattern.OtachiFrenzyFlankCombo ? 1.32f : 1.20f;
+                if (CurrentPhase >= 3) baseSpd += 0.10f;
+                if (IsEmpBuffed) baseSpd += 0.08f;
+                animator.speed = baseSpd;
+            }
             else if (currentState == AIState.Blocking && blockEnterFast)
             {
                 animator.speed = 1.75f;
@@ -970,6 +1135,8 @@ namespace PacificRimWater
 
             if ((IsAIDisabled && !isDebugForcedActionActive) || IsTimeFrozen)
             {
+            if (rb.isKinematic) return;
+
 #if UNITY_6000_0_OR_NEWER
                 rb.linearVelocity = Vector3.zero;
 #else
@@ -979,20 +1146,37 @@ namespace PacificRimWater
             }
 
             // Ground elevation tracking across seabed, ramps, and elevated city decks
+            // Uses RaycastAll filtered to non-self "Ground" surfaces so Kaiju's own upper-body colliders never block ramp detection
             float groundY = 0f;
-            if (Physics.Raycast(transform.position + Vector3.up * 40f, Vector3.down, out RaycastHit groundHit, 90f, LayerMask.GetMask("Default"), QueryTriggerInteraction.Ignore))
+            float bestGroundY = float.NegativeInfinity;
+            RaycastHit[] groundHits = Physics.RaycastAll(
+                transform.position + Vector3.up * 40f,
+                Vector3.down,
+                90f,
+                LayerMask.GetMask("Default"),
+                QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < groundHits.Length; i++)
             {
-                if (!groundHit.transform.IsChildOf(transform))
+                Collider gc = groundHits[i].collider;
+                if (gc == null || gc.transform.IsChildOf(transform)) continue;
+                if (!gc.CompareTag("Ground")) continue;
+                if (groundHits[i].point.y > bestGroundY)
                 {
-                    groundY = groundHit.point.y;
+                    bestGroundY = groundHits[i].point.y;
                 }
             }
-            float targetY = groundY + groundYOffset;
-            float vertVel = Mathf.Clamp((targetY - rb.position.y) * 8f, -20f, 20f);
+            if (bestGroundY > float.NegativeInfinity)
+            {
+                groundY = bestGroundY;
+            }
+            float targetY = groundY + groundYOffset + (isOtachi ? otachiDiveElevation : 0f);
+            float vertVel = Mathf.Clamp((targetY - rb.position.y) * 10f, -28f, 28f);
 
-            float effectiveAccel = isSlattern
-                ? (currentState == AIState.Attacking ? Mathf.Max(acceleration * 2.6f, 11.0f) : Mathf.Max(acceleration * 1.4f, 6.5f))
+            float effectiveAccel = (isSlattern || isOtachi)
+                ? (currentState == AIState.Attacking ? Mathf.Max(acceleration * 2.4f, 11.0f) : Mathf.Max(acceleration * 1.45f, 7.0f))
                 : acceleration;
+
+            if (rb.isKinematic) return;
 
 #if UNITY_6000_0_OR_NEWER
             Vector3 currentVel = rb.linearVelocity;
@@ -1138,9 +1322,11 @@ namespace PacificRimWater
         {
             if (thigh == null || shin == null || ankle == null) return;
 
-            // Measured Walk AnkleBone height offset above root: min=4.49m, max=9.58m
+            // Measured Walk AnkleBone height offset above root: Leatherback 4.49m..9.58m, Otachi ~1.55m..8.51m
             float relAnkleY = ankle.position.y - transform.position.y;
-            float swingLift = Mathf.Clamp01((relAnkleY - 4.8f) / 4.2f);
+            float liftBase = isOtachi ? 1.8f : 4.8f;
+            float liftSpan = isOtachi ? 6.0f : 4.2f;
+            float swingLift = Mathf.Clamp01((relAnkleY - liftBase) / liftSpan);
 
             Vector3 lateralSpread = transform.right * (sideSign * strafeStanceSpread * currentStrafeWeight);
             Vector3 swingLateralReach = transform.right * (currentStrafeDir * swingLift * strafeStepReach * currentStrafeWeight);
@@ -1251,6 +1437,12 @@ namespace PacificRimWater
                     if (isSlattern)
                     {
                         UpdateSlatternChasingState(dt, dist, dirToTarget);
+                        break;
+                    }
+
+                    if (isOtachi)
+                    {
+                        UpdateOtachiChasingState(dt, dist, dirToTarget);
                         break;
                     }
 
@@ -1383,6 +1575,25 @@ namespace PacificRimWater
                         break;
                     }
 
+                    if (isOtachi)
+                    {
+                        if (dist < 17.5f && otachiLungeCooldown <= 0.6f)
+                        {
+                            StartAttackPattern(CurrentPhase >= 2 ? AttackPattern.OtachiFrenzyFlankCombo : AttackPattern.OtachiStalkerLungeCombo);
+                        }
+                        else if (dist < 18.0f)
+                        {
+                            StartOtachiAcidRetreat(duration: Random.Range(1.1f, 1.6f));
+                        }
+                        else if (stateTimer <= 0f || (dist <= 52f && otachiLungeCooldown <= 0f))
+                        {
+                            StartAttackPattern(CurrentPhase >= 2 && Random.value < 0.55f
+                                ? AttackPattern.OtachiFrenzyFlankCombo
+                                : AttackPattern.OtachiStalkerLungeCombo);
+                        }
+                        break;
+                    }
+
                     // Punish reckless rush or explode out of the stalk into a charging Slam
                     if (dist < 17.5f)
                     {
@@ -1409,10 +1620,23 @@ namespace PacificRimWater
 
                     float backSpd = isSlattern
                         ? (backwardWalkSpeed * 1.35f)
-                        : (retreatWithSprint ? backwardSprintSpeed : backwardWalkSpeed);
-                    desiredVelocity = (-dirToTarget * backSpd) + transform.right * (circleStrafeDir * strafeSpeed * 0.35f);
+                        : (isOtachi
+                            ? (retreatWithSprint ? backwardSprintSpeed * 1.18f : backwardWalkSpeed * 1.25f)
+                            : (retreatWithSprint ? backwardSprintSpeed : backwardWalkSpeed));
+                    desiredVelocity = (-dirToTarget * backSpd) + transform.right * (circleStrafeDir * strafeSpeed * (isOtachi ? 0.65f : 0.35f));
                     SetLocomotionSpeed(isSlattern ? -1.12f : (retreatWithSprint ? -1.18f : -1.02f));
                     CrossFadeState(isSlattern ? "Walk" : (retreatWithSprint ? "Run" : "Walk"), 0.14f);
+
+                    if (isOtachi && otachiRetreatAcidEnabled && !IsBaguvixActive)
+                    {
+                        otachiAcidPoolTimer -= dt;
+                        if (otachiAcidPoolTimer <= 0f)
+                        {
+                            otachiAcidPoolTimer = otachiAcidPoolInterval;
+                            Vector3 poolOrigin = transform.position + transform.forward * 6.5f;
+                            OtachiAcidPool.Spawn(poolOrigin, targetJaeger, radius: 7.5f, duration: 7.5f, tickDamage: 9.0f);
+                        }
+                    }
 
                     if (stateTimer <= 0f || dist >= retreatTargetDist)
                     {
@@ -1432,6 +1656,13 @@ namespace PacificRimWater
                                 currentState = AIState.ChasingAndStrafing;
                                 postAttackPacingTimer = Random.Range(0.4f, 0.8f);
                             }
+                        }
+                        else if (isOtachi)
+                        {
+                            currentState = AIState.SizingUp;
+                            stateTimer = Random.Range(0.95f, 1.75f);
+                            circleStrafeDir = Random.value > 0.5f ? 1f : -1f;
+                            isStrafingInRange = true;
                         }
                         else if (CurrentPhase >= 2 && Random.value < 0.50f)
                         {
@@ -1479,9 +1710,11 @@ namespace PacificRimWater
 
                     if (!isAttackChargeApproaching)
                     {
-                        if (isSlattern)
+                        if (isSlattern || isOtachi)
                         {
-                            bool isFrenzy = activePattern == AttackPattern.DeviousBlitzLightCombo;
+                            bool isFrenzy = activePattern == AttackPattern.DeviousBlitzLightCombo ||
+                                            activePattern == AttackPattern.OtachiFrenzyFlankCombo ||
+                                            activePattern == AttackPattern.OtachiStalkerLungeCombo;
                             float effectiveTurn = isFrenzy
                                 ? Mathf.Max(turnSpeed * 2.15f, 200f)
                                 : Mathf.Clamp(attackTurnSpeed * 3.0f, 125f, 165f);
@@ -1600,6 +1833,11 @@ namespace PacificRimWater
                             consecutiveStaggers = 0;
                             StartRetreat(useSprint: true, duration: Random.Range(1.25f, 1.85f), customTargetDist: Random.Range(35f, 43f));
                         }
+                        else if (isOtachi)
+                        {
+                            consecutiveStaggers = 0;
+                            StartOtachiAcidRetreat(duration: Random.Range(1.05f, 1.55f));
+                        }
                         else if (consecutiveStaggers >= 2 && Random.value < 0.55f)
                         {
                             consecutiveStaggers = 0;
@@ -1612,6 +1850,126 @@ namespace PacificRimWater
                         }
                     }
                     break;
+            }
+        }
+
+        private void UpdateOtachiChasingState(float dt, float dist, Vector3 dirToTarget)
+        {
+            // Punish greedy close-range combos or crowding with fast Tail Whip + Back-Dash
+            if ((dist < 15.8f || otachiCloseRangeHits >= 2) && dist <= 22.0f && otachiTailWhipCooldown <= 0f)
+            {
+                otachiCloseRangeHits = 0;
+                StartAttackPattern(AttackPattern.OtachiTailWhipPunish);
+                return;
+            }
+
+            // Phase 2 & 3: Aggressive Acid Lockdown sweeping spray
+            if (CurrentPhase >= 2 && otachiAcidSprayCooldown <= 0f && dist >= 18.0f && dist <= 72f)
+            {
+                StartAttackPattern(AttackPattern.OtachiAcidSpraySweep);
+                return;
+            }
+
+            // Phase 1: Single telegraphed acid shot (keep-away zoner)
+            if (empCooldownTimer <= 0f && !IsEmpBuffed && dist >= 20.0f && dist <= 78f)
+            {
+                StartEmpRoar();
+                return;
+            }
+
+            // If Gipsy crowds too close while lunge & tail whip are on cooldown, quick back-dash with acid puddle
+            if (dist < 16.5f && otachiLungeCooldown > 0.65f)
+            {
+                StartOtachiAcidRetreat(duration: Random.Range(0.75f, 1.15f));
+                return;
+            }
+
+            // Phase 3: Airborne Dive-Bomber uses buffed long-range Dash ability (no running!) up to 78m
+            if (CurrentPhase >= 3)
+            {
+                if (otachiLungeCooldown <= 0f && dist <= 78f)
+                {
+                    StartAttackPattern(AttackPattern.OtachiDiveBomberRush);
+                    return;
+                }
+            }
+            else if (otachiLungeCooldown <= 0f && dist <= 52f)
+            {
+                AttackPattern lungePattern = (CurrentPhase == 2 && Random.value < 0.55f)
+                    ? AttackPattern.OtachiFrenzyFlankCombo
+                    : AttackPattern.OtachiStalkerLungeCombo;
+                StartAttackPattern(lungePattern);
+                return;
+            }
+
+            // Keep-away mid-range circle-stalking (25m - 35m). Phase 3 never runs to close distance—she stalks then Dashes!
+            float radial = 0f;
+            if (dist < otachiStalkMinDist) radial = -0.72f;
+            else if (dist > 64f) radial = 0.78f;
+            else if (dist > 44f) radial = 0.60f;
+            else if (dist > otachiStalkIdealDist) radial = 0.40f;
+
+            float spd = (dist > 48f ? walkSpeed * 1.15f : strafeSpeed * (CurrentPhase >= 2 ? 1.32f : 1.16f));
+            if (IsEmpBuffed) spd *= 1.12f;
+
+            if (CurrentPhase < 3 && dist > 54f && canSprint)
+            {
+                desiredVelocity = (transform.forward + transform.right * (circleStrafeDir * 0.25f)).normalized * (IsEmpBuffed ? empSprintSpeed : sprintSpeed);
+                SetLocomotionSpeed(IsEmpBuffed ? 1.18f : 1.08f);
+                CrossFadeState("Run", 0.14f);
+            }
+            else
+            {
+                desiredVelocity = (transform.right * circleStrafeDir + transform.forward * radial).normalized * spd;
+                bool isMovingBackward = radial < -0.05f || Vector3.Dot(desiredVelocity, transform.forward) < -0.05f;
+                SetLocomotionSpeed(isMovingBackward ? -1.15f : 1.18f);
+                CrossFadeState("Walk", 0.14f);
+                isStrafingInRange = true;
+            }
+        }
+
+        private void StartOtachiAcidRetreat(float duration, float customTargetDist = -1f)
+        {
+            float targetD = customTargetDist > 0f ? customTargetDist : Random.Range(29f, 38f);
+            StartRetreat(useSprint: true, duration: duration, customTargetDist: targetD);
+            otachiAcidPoolTimer = 0.12f;
+
+            if (otachiRetreatAcidEnabled && !IsBaguvixActive)
+            {
+                Vector3 dropPos = transform.position + transform.forward * 6.5f;
+                float poolRad = CurrentPhase >= 2 ? 9.0f : 7.5f;
+                float poolDur = CurrentPhase >= 2 ? 11.5f : 8.0f;
+                OtachiAcidPool.Spawn(dropPos, targetJaeger, radius: poolRad, duration: poolDur, tickDamage: 8.5f);
+            }
+        }
+
+        private void SpawnOtachiAcidSpitVolley(int count, float spreadHalfDeg = 18f)
+        {
+            if (IsBaguvixActive || IsDead) return;
+            Vector3 mouthOrigin = mouthBone != null
+                ? mouthBone.position
+                : (transform.position + transform.forward * 9f + Vector3.up * 15f);
+
+            Vector3 baseTarget = targetJaeger != null
+                ? targetJaeger.transform.position + Vector3.up * 4f
+                : (transform.position + transform.forward * 28f);
+
+            float poolRad = CurrentPhase >= 2 ? 9.0f : 7.5f;
+            float poolDur = CurrentPhase >= 2 ? 11.5f : 8.0f;
+
+            for (int i = 0; i < count; i++)
+            {
+                float spreadAngle = count <= 1 ? 0f : Mathf.Lerp(-spreadHalfDeg, spreadHalfDeg, (float)i / (count - 1));
+                Vector3 toT = baseTarget - mouthOrigin;
+                Vector3 rotated = Quaternion.Euler(0f, spreadAngle, 0f) * new Vector3(toT.x, 0f, toT.z);
+                Vector3 aimPos = mouthOrigin + rotated + Vector3.up * (baseTarget.y - mouthOrigin.y);
+                OtachiAcidSpitProjectile.Spawn(
+                    mouthOrigin, aimPos, targetJaeger, transform,
+                    dmg: 16f + CurrentPhase * 2f,
+                    arcHeight: 5.5f + (i % 3) * 0.7f,
+                    flightTime: 0.78f,
+                    poolRad: poolRad,
+                    poolDur: poolDur);
             }
         }
 
@@ -1755,13 +2113,21 @@ namespace PacificRimWater
             currentAnimState = stateName;
             // Start near the end of Walk when playing backwards so reverse locomotion begins without a seam hitch
             float fixedTimeOffset = (stateName == "Walk" && currentLocomotionSpeed < 0f)
-                ? (isSlattern ? 4.75f : 3.95f)
+                ? (isSlattern ? 4.75f : (isOtachi ? 3.90f : 3.95f))
                 : 0f;
             animator.CrossFadeInFixedTime(stateName, fadeDuration, 0, fixedTimeOffset);
         }
 
         private void CancelActiveSequence()
         {
+            if (isOtachi && CurrentPhase == 3 &&
+                activePattern == AttackPattern.OtachiDiveBomberRush &&
+                otachiInDiveBombAttempt && !otachiSlamCompletedThisRush)
+            {
+                // Player interrupted Dash > Flurry > Slam! Next attempt turns into Dash > Flurry > DashBack.
+                otachiPhase3SlamInterrupted = true;
+            }
+
             if (activeSequenceCoroutine != null)
             {
                 StopCoroutine(activeSequenceCoroutine);
@@ -1770,6 +2136,8 @@ namespace PacificRimWater
             activePattern = AttackPattern.None;
             hasHyperArmor = false;
             isAttackChargeApproaching = false;
+            otachiDiveElevation = 0f;
+            otachiInDiveBombAttempt = false;
         }
 
         private void StartSizingUp(float customDuration = -1f)
@@ -1844,6 +2212,12 @@ namespace PacificRimWater
             PacificRimAudio.PacificRimAudioManager.Instance?.SetKaijuEmpSparksLoop(true, transform.position + Vector3.up * 14f);
             EmitOceanImpact(center, transform.forward, 32f, 2.8f, 3.2f, true, 1.4f);
 
+            if (isOtachi)
+            {
+                // Phase 1 fires a single telegraphed acid shot; Phase 2/3 unleash multi-shot acid volleys
+                SpawnOtachiAcidSpitVolley(CurrentPhase == 1 ? 1 : (CurrentPhase == 2 ? 3 : 4), spreadHalfDeg: CurrentPhase == 1 ? 0f : 26f);
+            }
+
             Camera cam = Camera.main;
             if (cam != null)
             {
@@ -1879,6 +2253,13 @@ namespace PacificRimWater
                     ? "SLATTERN PHASE II // BLITZER PARRY MODE ENGAGED!"
                     : "SLATTERN PHASE III // MOVING-GUARD JUGGERNAUT (HEAVY TO BREAK!)";
                 PacificRimUI.JaegerHUD.Instance?.ShowBanner(msg, 3.0f);
+            }
+            else if (isOtachi)
+            {
+                string msg = targetPhase == 2
+                    ? "OTACHI PHASE II // ACID LOCKDOWN — WATCH THE FLOOR!"
+                    : "OTACHI PHASE III // AIRBORNE DIVE-BOMBER — INTERRUPT HER SLAM!";
+                PacificRimUI.JaegerHUD.Instance?.ShowBanner(msg, 3.2f);
             }
             Debug.Log($"<color=#ff3333><b>[{kaijuDisplayName} PHASE {targetPhase}]</b></color> Phase transition triggered!");
         }
@@ -1924,6 +2305,10 @@ namespace PacificRimWater
             PacificRimAudio.PacificRimAudioManager.Instance?.SetKaijuEmpSparksLoop(true, transform.position + Vector3.up * 14f);
             EmitOceanImpact(pulsePos, Vector3.up, 36f, 3.2f, 3.4f, true, 1.8f);
             WaterSplashManager.Instance?.SpawnCombatSparks(pulsePos + Vector3.up * 12f, Vector3.up, false, true, true);
+            if (isOtachi)
+            {
+                SpawnOtachiAcidSpitVolley(phase >= 3 ? 4 : 3);
+            }
 
             yield return WaitForUnfrozenSeconds(ActiveEmpClipLength * 0.55f);
             if (IsDead || currentState != AIState.PhaseTransition) yield break;
@@ -1941,6 +2326,20 @@ namespace PacificRimWater
                     movingGuardLightHits = 0;
                     currentState = AIState.ChasingAndStrafing;
                     postAttackPacingTimer = 0.15f;
+                }
+            }
+            else if (isOtachi)
+            {
+                otachiLungeCooldown = 0.45f;
+                otachiAcidSprayCooldown = phase == 2 ? 1.2f : 3.0f;
+                if (phase >= 3)
+                {
+                    otachiPhase3SlamInterrupted = false;
+                    StartAttackPattern(AttackPattern.OtachiDiveBomberRush);
+                }
+                else
+                {
+                    StartAttackPattern(AttackPattern.OtachiAcidSpraySweep);
                 }
             }
             else if (phase >= 2)
@@ -2008,13 +2407,18 @@ namespace PacificRimWater
                                  currentState == AIState.Retreating;
             if (!canAnticipate) return;
 
-            float baseChance = CurrentPhase == 1 ? 0.38f : (CurrentPhase == 2 ? 0.52f : 0.68f);
-            float spamBonus = Mathf.Max(0, playerSpamCount - 1) * 0.26f;
-            float blockChance = Mathf.Min(0.95f, baseChance + spamBonus);
+            float baseChance = isOtachi
+                ? (CurrentPhase == 1 ? 0.16f : (CurrentPhase == 2 ? 0.24f : 0.30f))
+                : (CurrentPhase == 1 ? 0.38f : (CurrentPhase == 2 ? 0.52f : 0.68f));
+            float spamBonus = Mathf.Max(0, playerSpamCount - 1) * (isOtachi ? 0.18f : 0.26f);
+            float blockChance = Mathf.Min(isOtachi ? 0.68f : 0.95f, baseChance + spamBonus);
 
             if (playerSpamCount >= 4 || Random.value < blockChance)
             {
-                StartBlock(fastReaction: true);
+                if (isOtachi && playerSpamCount >= 3 && Random.value < 0.55f)
+                    StartOtachiAcidRetreat(duration: Random.Range(0.95f, 1.35f));
+                else
+                    StartBlock(fastReaction: true);
             }
         }
 
@@ -2085,6 +2489,12 @@ namespace PacificRimWater
                 return;
             }
 
+            if (isOtachi)
+            {
+                StartAttackPattern(CurrentPhase >= 2 ? AttackPattern.OtachiFrenzyFlankCombo : AttackPattern.OtachiStalkerLungeCombo, hyperArmored: true);
+                return;
+            }
+
             AttackPattern counter;
             float r = Random.value;
             if (CurrentPhase >= 2 && r < 0.40f) counter = AttackPattern.TripleBrawlerCombo;
@@ -2107,7 +2517,9 @@ namespace PacificRimWater
             activePattern = pattern;
             hasHyperArmor = isSlattern
                 ? isParryCountering
-                : (hyperArmored || pattern == AttackPattern.HeavySlam || pattern == AttackPattern.SprintChargeSlam);
+                : (isOtachi
+                    ? hyperArmored
+                    : (hyperArmored || pattern == AttackPattern.HeavySlam || pattern == AttackPattern.SprintChargeSlam));
             SetLocomotionSpeed(1f);
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuAttackGrunt(transform.position + Vector3.up * 14f);
             activeSequenceCoroutine = StartCoroutine(ExecuteAttackSequence(pattern));
@@ -2385,6 +2797,318 @@ namespace PacificRimWater
                     slatternBlitzCooldown = Random.Range(1.6f, 2.6f);
                     break;
                 }
+
+                case AttackPattern.OtachiStalkerLungeCombo:
+                {
+                    // High-speed predator lunge into melee range, then a crisp 3-hit claw/slam combo
+                    yield return ChaseUntilInRangeRoutine(
+                        3.4f,
+                        meleeAttackRange - 1.5f,
+                        empSprintSpeed * 1.28f,
+                        Mathf.Max(turnSpeed * 1.8f, 190f),
+                        1.22f,
+                        "Run");
+
+                    if (currentState != AIState.Attacking) yield break;
+                    if (FlatDistToTarget() > meleeAttackRange + 8.5f)
+                    {
+                        activePattern = AttackPattern.None;
+                        hasHyperArmor = false;
+                        otachiLungeCooldown = 0.75f;
+                        currentState = AIState.ChasingAndStrafing;
+                        yield break;
+                    }
+
+                    float comboSpd = (CurrentPhase >= 3 ? 1.28f : 1.18f) * (IsEmpBuffed ? 1.08f : 1.0f);
+                    isAttackChargeApproaching = false;
+                    SetLocomotionSpeed(1f);
+
+                    // Hit 1: Left Claw Hook
+                    CrossFadeState("PunchLeft", 0.08f, true);
+                    yield return WaitForUnfrozenSeconds(leftHitTime / comboSpd);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(handL, transform.position + transform.forward * 12f + Vector3.up * 10f, lightPunchDamage * 0.85f, punchStrikeRadius, false, 14f);
+
+                    yield return WaitForUnfrozenSeconds(0.08f / comboSpd);
+                    if (currentState != AIState.Attacking) yield break;
+
+                    // Hit 2: Right Claw Hook
+                    CrossFadeState("PunchRight", 0.08f, true);
+                    yield return WaitForUnfrozenSeconds(rightHitTime / comboSpd);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(handR, transform.position + transform.forward * 12f + Vector3.up * 10f, lightPunchDamage * 0.95f, punchStrikeRadius, false, 18f);
+
+                    yield return WaitForUnfrozenSeconds(0.10f / comboSpd);
+                    if (currentState != AIState.Attacking) yield break;
+
+                    // Hit 3: Pounce Slam Finisher
+                    hasHyperArmor = true;
+                    CrossFadeState("Slam", 0.10f, true);
+                    yield return WaitForUnfrozenSeconds(slamHitTime / comboSpd);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(null, GetSlamCenter(), heavySlamDamage, slamStrikeRadius, true, 32f);
+                    yield return WaitForUnfrozenSeconds(Mathf.Max(0.05f, (slamClipLen - slamHitTime) * 0.85f / comboSpd));
+
+                    otachiLungeCooldown = CurrentPhase >= 3 ? Random.Range(1.2f, 1.9f) : Random.Range(1.7f, 2.5f);
+                    break;
+                }
+
+                case AttackPattern.OtachiFrenzyFlankCombo:
+                {
+                    // Rapid hit-and-run 4-hit claw flurry with mid-combo pursuit tracking
+                    yield return ChaseUntilInRangeRoutine(
+                        3.4f,
+                        meleeAttackRange - 1.8f,
+                        empSprintSpeed * 1.36f,
+                        Mathf.Max(turnSpeed * 2.0f, 210f),
+                        1.26f,
+                        "Run");
+
+                    if (currentState != AIState.Attacking) yield break;
+                    if (FlatDistToTarget() > meleeAttackRange + 9.0f)
+                    {
+                        activePattern = AttackPattern.None;
+                        hasHyperArmor = false;
+                        otachiLungeCooldown = 0.7f;
+                        currentState = AIState.ChasingAndStrafing;
+                        yield break;
+                    }
+
+                    float flurrySpd = (CurrentPhase >= 3 ? 1.38f : 1.28f) * (IsEmpBuffed ? 1.08f : 1.0f);
+                    for (int hitIdx = 0; hitIdx < 4; hitIdx++)
+                    {
+                        if (currentState != AIState.Attacking) yield break;
+
+                        if (FlatDistToTarget() > meleeAttackRange - 1.2f)
+                        {
+                            yield return ChaseUntilInRangeRoutine(
+                                1.1f,
+                                meleeAttackRange - 2.0f,
+                                empSprintSpeed * 1.40f,
+                                Mathf.Max(turnSpeed * 2.15f, 220f),
+                                1.26f,
+                                "Run");
+                            if (currentState != AIState.Attacking) yield break;
+                            if (FlatDistToTarget() > meleeAttackRange + 9.5f) break;
+                        }
+
+                        isAttackChargeApproaching = false;
+                        SetLocomotionSpeed(1f);
+                        bool useLeft = (hitIdx % 2) == 0;
+                        CrossFadeState(useLeft ? "PunchLeft" : "PunchRight", 0.07f, true);
+                        float windup = useLeft ? leftHitTime : rightHitTime;
+                        yield return WaitForUnfrozenSeconds(windup / flurrySpd);
+                        if (currentState != AIState.Attacking) yield break;
+
+                        ExecuteStrikeImpact(
+                            useLeft ? handL : handR,
+                            transform.position + transform.forward * 12f + Vector3.up * 10f,
+                            lightPunchDamage * (hitIdx == 3 ? 0.95f : 0.72f),
+                            punchStrikeRadius * 1.10f,
+                            false,
+                            hitIdx == 3 ? 24f : 12f);
+                        yield return WaitForUnfrozenSeconds(Mathf.Max(0.05f, (punchClipLen - windup) * 0.65f / flurrySpd));
+                    }
+
+                    otachiLungeCooldown = CurrentPhase >= 3 ? Random.Range(1.1f, 1.8f) : Random.Range(1.6f, 2.4f);
+                    break;
+                }
+
+                case AttackPattern.OtachiTailWhipPunish:
+                {
+                    // Punishes greedy close-range combos: 360-degree tail sweep knocking Gipsy back + instant back-dash
+                    isAttackChargeApproaching = false;
+                    SetLocomotionSpeed(1f);
+                    CrossFadeState("PunchRight", 0.08f, true);
+                    GetComponent<KaijuBioluminescenceController>()?.TriggerSurge(1.8f);
+
+                    float spinDuration = 0.48f;
+                    float startYaw = currentBodyYaw;
+                    float elapsed = 0f;
+                    bool hitDelivered = false;
+                    while (elapsed < spinDuration && currentState == AIState.Attacking)
+                    {
+                        if (!IsTimeFrozen)
+                        {
+                            elapsed += Time.deltaTime;
+                            float t = Mathf.Clamp01(elapsed / spinDuration);
+                            currentBodyYaw = Mathf.Repeat(startYaw + 360f * t, 360f);
+                            transform.rotation = Quaternion.Euler(0f, currentBodyYaw, 0f);
+                            desiredVelocity = Vector3.zero;
+
+                            if (!hitDelivered && t >= 0.55f)
+                            {
+                                hitDelivered = true;
+                                Vector3 tailOrigin = tailTipBone != null
+                                    ? tailTipBone.position
+                                    : (transform.position - transform.forward * 10f + Vector3.up * 10f);
+                                ExecuteStrikeImpact(tailTipBone, tailOrigin, lightPunchDamage * 1.15f, 18.5f, true, 38f, full360Sweep: true);
+                            }
+                        }
+                        yield return null;
+                    }
+
+                    if (currentState != AIState.Attacking) yield break;
+                    otachiTailWhipCooldown = CurrentPhase >= 2 ? 3.2f : 4.0f;
+                    yield return OtachiDashBackRoutine(dashSpeed: 42f, duration: 0.34f, dropAcid: true);
+                    otachiLungeCooldown = Mathf.Max(otachiLungeCooldown, 0.85f);
+                    break;
+                }
+
+                case AttackPattern.OtachiAcidSpraySweep:
+                {
+                    // Phase 2/3 Acid Lockdown: sweeping 5-shot corrosive barrage across the arena floor
+                    isAttackChargeApproaching = false;
+                    desiredVelocity = Vector3.zero;
+                    SetLocomotionSpeed(1f);
+                    CrossFadeState("EMP", 0.12f, true);
+                    GetComponent<KaijuBioluminescenceController>()?.TriggerSurge(2.8f);
+                    PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuEmpRoar(transform.position + Vector3.up * 14f);
+
+                    yield return WaitForUnfrozenSeconds(0.55f);
+                    if (currentState != AIState.Attacking) yield break;
+
+                    float centerYaw = currentBodyYaw;
+                    if (targetJaeger != null)
+                    {
+                        Vector3 toT = targetJaeger.transform.position - transform.position;
+                        toT.y = 0f;
+                        if (toT.sqrMagnitude > 0.1f) centerYaw = Mathf.Atan2(toT.x, toT.z) * Mathf.Rad2Deg;
+                    }
+
+                    const int sprayCount = 5;
+                    for (int i = 0; i < sprayCount; i++)
+                    {
+                        if (currentState != AIState.Attacking) yield break;
+                        float sweepFrac = (float)i / (sprayCount - 1);
+                        float sweepDeg = Mathf.Lerp(-34f, 34f, sweepFrac);
+                        currentBodyYaw = Mathf.Repeat(centerYaw + sweepDeg, 360f);
+                        transform.rotation = Quaternion.Euler(0f, currentBodyYaw, 0f);
+
+                        Vector3 mouthOrigin = mouthBone != null
+                            ? mouthBone.position
+                            : (transform.position + transform.forward * 9f + Vector3.up * 15f);
+                        float targetDist = Mathf.Clamp(FlatDistToTarget(), 20f, 44f) + Random.Range(-4f, 5f);
+                        Vector3 aimPos = transform.position + (Quaternion.Euler(0f, currentBodyYaw, 0f) * Vector3.forward) * targetDist + Vector3.up * 3f;
+
+                        OtachiAcidSpitProjectile.Spawn(
+                            mouthOrigin, aimPos, targetJaeger, transform,
+                            dmg: 16f + CurrentPhase * 2f,
+                            arcHeight: 4.5f,
+                            flightTime: 0.72f,
+                            poolRad: 9.2f,
+                            poolDur: 11.5f);
+
+                        yield return WaitForUnfrozenSeconds(0.16f);
+                    }
+
+                    yield return WaitForUnfrozenSeconds(0.45f);
+                    otachiAcidSprayCooldown = CurrentPhase >= 3 ? Random.Range(4.8f, 6.5f) : Random.Range(4.2f, 5.8f);
+                    break;
+                }
+
+                case AttackPattern.OtachiDiveBomberRush:
+                {
+                    // Phase 3 Airborne Dive-Bomber:
+                    // - Normal attempt: Long-range buffed Dash -> Flurry -> Heavy Dive Slam
+                    // - If previous Slam attempt was interrupted: Dash -> Flurry -> DashBack (feint & retry!)
+                    bool executeDashBackInsteadOfSlam = otachiPhase3SlamInterrupted;
+                    otachiInDiveBombAttempt = !executeDashBackInsteadOfSlam;
+                    otachiSlamCompletedThisRush = false;
+
+                    // 1. Buffed long-range burst dash (no running!)
+                    yield return OtachiBurstDashRoutine(
+                        targetStopDist: meleeAttackRange - 1.8f,
+                        dashSpeed: 54f,
+                        maxDuration: 1.45f,
+                        divePeakHeight: 8.0f);
+
+                    if (currentState != AIState.Attacking) yield break;
+                    if (FlatDistToTarget() > meleeAttackRange + 11.0f)
+                    {
+                        otachiInDiveBombAttempt = false;
+                        activePattern = AttackPattern.None;
+                        hasHyperArmor = false;
+                        otachiLungeCooldown = 0.65f;
+                        currentState = AIState.ChasingAndStrafing;
+                        yield break;
+                    }
+
+                    // 2. Rapid 2-hit claw Flurry
+                    float flurrySpd = 1.38f;
+                    isAttackChargeApproaching = false;
+                    SetLocomotionSpeed(1f);
+
+                    CrossFadeState("PunchLeft", 0.06f, true);
+                    yield return WaitForUnfrozenSeconds(leftHitTime / flurrySpd);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(handL, transform.position + transform.forward * 12f + Vector3.up * 10f, lightPunchDamage * 0.85f, punchStrikeRadius * 1.1f, false, 12f);
+
+                    yield return WaitForUnfrozenSeconds(0.06f / flurrySpd);
+                    if (currentState != AIState.Attacking) yield break;
+
+                    CrossFadeState("PunchRight", 0.06f, true);
+                    yield return WaitForUnfrozenSeconds(rightHitTime / flurrySpd);
+                    if (currentState != AIState.Attacking) yield break;
+                    ExecuteStrikeImpact(handR, transform.position + transform.forward * 12f + Vector3.up * 10f, lightPunchDamage * 0.90f, punchStrikeRadius * 1.1f, false, 14f);
+
+                    yield return WaitForUnfrozenSeconds(0.08f / flurrySpd);
+                    if (currentState != AIState.Attacking) yield break;
+
+                    // 3. Branch based on whether previous Slam attempt was interrupted
+                    if (executeDashBackInsteadOfSlam)
+                    {
+                        // Interrupted previously -> DashBack instead of Slam, then retry another rush!
+                        otachiPhase3SlamInterrupted = false;
+                        otachiInDiveBombAttempt = false;
+                        yield return OtachiDashBackRoutine(dashSpeed: 52f, duration: 0.42f, dropAcid: true);
+                        otachiLungeCooldown = Random.Range(0.75f, 1.15f);
+                        if (currentState == AIState.Attacking)
+                        {
+                            activePattern = AttackPattern.None;
+                            currentState = AIState.ChasingAndStrafing;
+                            postAttackPacingTimer = 0.2f;
+                        }
+                        yield break;
+                    }
+
+                    // Normal Phase 3 Finisher: Airborne Dive-Bomb Heavy Slam (interruptible!)
+                    float slamSpd = 1.18f;
+                    CrossFadeState("Slam", 0.08f, true);
+                    float slamWindup = slamHitTime / slamSpd;
+                    float slamElapsed = 0f;
+                    while (slamElapsed < slamWindup && currentState == AIState.Attacking)
+                    {
+                        if (!IsTimeFrozen)
+                        {
+                            slamElapsed += Time.deltaTime;
+                            float p = Mathf.Clamp01(slamElapsed / slamWindup);
+                            otachiDiveElevation = Mathf.Sin(p * Mathf.PI) * 7.5f;
+                            if (targetJaeger != null)
+                            {
+                                Vector3 toT = targetJaeger.transform.position - transform.position;
+                                toT.y = 0f;
+                                if (toT.sqrMagnitude > 0.1f)
+                                {
+                                    RotateYawToward(Mathf.Atan2(toT.x, toT.z) * Mathf.Rad2Deg, turnSpeed * 1.4f, Time.deltaTime);
+                                }
+                                desiredVelocity = transform.forward * (toT.magnitude > minCombatDistance ? 14f : 4f);
+                            }
+                        }
+                        yield return null;
+                    }
+                    otachiDiveElevation = 0f;
+                    if (currentState != AIState.Attacking) yield break;
+
+                    ExecuteStrikeImpact(null, GetSlamCenter(), heavySlamDamage * 1.45f, slamStrikeRadius * 1.25f, true, 40f);
+                    otachiSlamCompletedThisRush = true;
+                    otachiPhase3SlamInterrupted = false;
+                    otachiInDiveBombAttempt = false;
+
+                    yield return WaitForUnfrozenSeconds(Mathf.Max(0.05f, (slamClipLen - slamHitTime) * 0.8f / slamSpd));
+                    otachiLungeCooldown = Random.Range(1.2f, 1.8f);
+                    break;
+                }
             }
 
             if (currentState == AIState.Attacking)
@@ -2404,21 +3128,26 @@ namespace PacificRimWater
                 {
                     isDebugForcedActionActive = false;
                     if (isSlattern)
-                {
-                    if (CurrentPhase == 3)
                     {
-                        // Phase 3 tank never retreats: immediately re-engages forward Moving Guard
-                        currentState = AIState.ChasingAndStrafing;
-                        postAttackPacingTimer = Random.Range(0.45f, 0.75f);
-                        circleStrafeDir = Random.value > 0.5f ? 1f : -1f;
+                        if (CurrentPhase == 3)
+                        {
+                            // Phase 3 tank never retreats: immediately re-engages forward Moving Guard
+                            currentState = AIState.ChasingAndStrafing;
+                            postAttackPacingTimer = Random.Range(0.45f, 0.75f);
+                            circleStrafeDir = Random.value > 0.5f ? 1f : -1f;
+                        }
+                        else
+                        {
+                            // Phase 1/2 Distance Fighter & Blitzer back-sprint into the fog after attacking
+                            StartRetreat(useSprint: true, duration: Random.Range(1.05f, 1.55f), customTargetDist: CurrentPhase == 1 ? 42f : 36f);
+                        }
                     }
-                    else
+                    else if (isOtachi)
                     {
-                        // Phase 1/2 Distance Fighter & Blitzer back-sprint into the fog after attacking
-                        StartRetreat(useSprint: true, duration: Random.Range(1.05f, 1.55f), customTargetDist: CurrentPhase == 1 ? 42f : 36f);
+                        // Hit-and-Run Stalker: immediately disengage with corrosive acid wake after combo!
+                        StartOtachiAcidRetreat(duration: Random.Range(1.05f, 1.55f));
                     }
-                }
-                else if (Random.value < 0.45f)
+                    else if (Random.value < 0.45f)
                 {
                     StartRetreat(useSprint: CurrentPhase >= 2 && Random.value < 0.55f, duration: Random.Range(1.0f, 1.55f));
                 }
@@ -2432,6 +3161,79 @@ namespace PacificRimWater
             }
         }
 
+        private IEnumerator OtachiBurstDashRoutine(float targetStopDist, float dashSpeed, float maxDuration, float divePeakHeight)
+        {
+            isAttackChargeApproaching = true;
+            SetLocomotionSpeed(1.35f);
+            CrossFadeState("Run", 0.06f, true);
+            EmitOceanImpact(transform.position, -transform.forward, 26f, 2.4f, 2.6f, true, 0.9f);
+
+            float elapsed = 0f;
+            while (elapsed < maxDuration && currentState == AIState.Attacking && targetJaeger != null)
+            {
+                if (!IsTimeFrozen)
+                {
+                    Vector3 toT = targetJaeger.transform.position - transform.position;
+                    toT.y = 0f;
+                    float d = toT.magnitude;
+                    if (d > 0.1f)
+                    {
+                        RotateYawToward(Mathf.Atan2(toT.x, toT.z) * Mathf.Rad2Deg, Mathf.Max(turnSpeed * 2.4f, 260f), Time.deltaTime);
+                    }
+                    elapsed += Time.deltaTime;
+                    float arcT = Mathf.Clamp01(elapsed / Mathf.Max(0.25f, maxDuration * 0.55f));
+                    otachiDiveElevation = Mathf.Sin(arcT * Mathf.PI) * divePeakHeight;
+                    desiredVelocity = transform.forward * dashSpeed;
+                    if (d <= targetStopDist) break;
+                }
+                yield return null;
+            }
+            otachiDiveElevation = 0f;
+            desiredVelocity = Vector3.zero;
+            isAttackChargeApproaching = false;
+        }
+
+        private IEnumerator OtachiDashBackRoutine(float dashSpeed, float duration, bool dropAcid)
+        {
+            isAttackChargeApproaching = true;
+            SetLocomotionSpeed(-1.35f);
+            CrossFadeState("Run", 0.06f, true);
+            EmitOceanImpact(transform.position, transform.forward, 24f, 2.2f, 2.2f, true, 0.6f);
+
+            if (dropAcid && otachiRetreatAcidEnabled && !IsBaguvixActive)
+            {
+                Vector3 dropPos = transform.position + transform.forward * 6.0f;
+                float poolRad = CurrentPhase >= 2 ? 9.0f : 7.5f;
+                float poolDur = CurrentPhase >= 2 ? 11.5f : 8.0f;
+                OtachiAcidPool.Spawn(dropPos, targetJaeger, radius: poolRad, duration: poolDur, tickDamage: 8.5f);
+            }
+
+            float elapsed = 0f;
+            while (elapsed < duration && currentState == AIState.Attacking)
+            {
+                if (!IsTimeFrozen)
+                {
+                    if (targetJaeger != null)
+                    {
+                        Vector3 toT = targetJaeger.transform.position - transform.position;
+                        toT.y = 0f;
+                        if (toT.sqrMagnitude > 0.1f)
+                        {
+                            RotateYawToward(Mathf.Atan2(toT.x, toT.z) * Mathf.Rad2Deg, turnSpeed * 1.6f, Time.deltaTime);
+                        }
+                    }
+                    elapsed += Time.deltaTime;
+                    float arcT = Mathf.Clamp01(elapsed / Mathf.Max(0.05f, duration));
+                    otachiDiveElevation = Mathf.Sin(arcT * Mathf.PI) * 3.5f;
+                    desiredVelocity = -transform.forward * dashSpeed;
+                }
+                yield return null;
+            }
+            otachiDiveElevation = 0f;
+            desiredVelocity = Vector3.zero;
+            isAttackChargeApproaching = false;
+        }
+
         private Vector3 GetSlamCenter()
         {
             if (handL != null && handR != null)
@@ -2441,7 +3243,7 @@ namespace PacificRimWater
             return transform.position + transform.forward * 12.5f + Vector3.up * 8f;
         }
 
-        private void ExecuteStrikeImpact(Transform handBone, Vector3 fallbackPos, float damage, float strikeRadius, bool isHeavy, float knockbackImpulse)
+        private void ExecuteStrikeImpact(Transform handBone, Vector3 fallbackPos, float damage, float strikeRadius, bool isHeavy, float knockbackImpulse, bool full360Sweep = false)
         {
             if (IsTimeFrozen) return;
             Vector3 impactPos = handBone != null ? handBone.position : fallbackPos;
@@ -2454,6 +3256,26 @@ namespace PacificRimWater
                 PacificRimAudio.PacificRimAudioManager.Instance?.PlayKaijuBite(impactPos);
             }
             EmitOceanImpact(impactPos, transform.forward, isHeavy ? slamWaveRadius : 18f, isHeavy ? slamWaveStrength : 1.8f, isHeavy ? 2.6f : 1.4f, isHeavy, isHeavy ? 1.5f : 0.8f);
+            PacificRimEnvironment.HongKongDestructibleStructure.TriggerBreakInRadius(
+                impactPos,
+                Mathf.Max(10f, strikeRadius * 0.9f),
+                transform.forward * (isHeavy ? 22f : 14f),
+                isHeavy ? 1.35f : 1.0f);
+            Collider[] envCols = Physics.OverlapSphere(impactPos, Mathf.Max(8f, strikeRadius * 0.85f), ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < envCols.Length; i++)
+            {
+                var c = envCols[i];
+                if (c == null) continue;
+                var recv = c.GetComponentInParent<PacificRimEnvironment.UrbanBuildingImpactReceiver>();
+                if (recv != null)
+                {
+                    Vector3 hitPt = c.ClosestPoint(impactPos);
+                    Vector3 n = impactPos - hitPt;
+                    if (n.sqrMagnitude < 0.001f) n = -transform.forward;
+                    recv.RegisterImpact(hitPt, n.normalized, isHeavy);
+                    break;
+                }
+            }
 
             if (isCutsceneMode)
             {
@@ -2476,10 +3298,14 @@ namespace PacificRimWater
             float rootDist = flatToJaeger.magnitude;
             float fwdDot = rootDist > 0.01f ? Vector3.Dot(transform.forward, flatToJaeger / rootDist) : 1f;
 
-            float minFwdDot = isSlattern
-                ? (activePattern == AttackPattern.DeviousBlitzLightCombo ? 0.52f : 0.60f)
-                : 0.68f;
-            bool inStrikeZone = (handDist <= strikeRadius || handHorizDist <= strikeRadius || rootDist <= meleeAttackRange - 1.0f) && fwdDot >= minFwdDot;
+            float minFwdDot = full360Sweep
+                ? -1.0f
+                : (isSlattern
+                    ? (activePattern == AttackPattern.DeviousBlitzLightCombo ? 0.52f : 0.60f)
+                    : 0.68f);
+            bool inStrikeZone = full360Sweep
+                ? (rootDist <= strikeRadius + 4.5f || handHorizDist <= strikeRadius)
+                : ((handDist <= strikeRadius || handHorizDist <= strikeRadius || rootDist <= meleeAttackRange - 1.0f) && fwdDot >= minFwdDot);
             if (inStrikeZone)
             {
                 Vector3 kbDir = rootDist > 0.01f ? (flatToJaeger / rootDist) : transform.forward;
@@ -2683,6 +3509,19 @@ namespace PacificRimWater
 
             if (IsDead || currentState == AIState.PhaseTransition) return;
 
+            if (isOtachi && targetJaeger != null)
+            {
+                float hitDist = Vector2.Distance(
+                    new Vector2(transform.position.x, transform.position.z),
+                    new Vector2(targetJaeger.transform.position.x, targetJaeger.transform.position.z));
+                if (hitDist <= 18.5f)
+                {
+                    if (Time.time - otachiCloseRangeHitWindow > 2.8f) otachiCloseRangeHits = 0;
+                    otachiCloseRangeHits++;
+                    otachiCloseRangeHitWindow = Time.time;
+                }
+            }
+
             // Hyper-armor attacks cannot be interrupted mid-swing unless broken by a Heavy or Unblockable Attack
             if (hasHyperArmor && !isHeavyHit && !unblockable)
             {
@@ -2699,13 +3538,13 @@ namespace PacificRimWater
             if (attackVariant == 4 || attackVariant == 5 || isHeavyHit)
             {
                 targetStagger = "StaggerDown";
-                staggerDuration = (isSlattern ? SlatternStaggerClipLength : StaggerDownClipLength) / 1.15f;
+                staggerDuration = (isSlattern ? SlatternStaggerClipLength : (isOtachi ? OtachiStaggerUpDownClipLength : StaggerDownClipLength)) / 1.15f;
                 if (isSlattern) EmitOceanImpact(transform.position, -transform.forward, 26f, 2.4f, 2.5f, true, 1.2f);
             }
             else if (attackVariant == 3)
             {
                 targetStagger = "StaggerUp";
-                staggerDuration = (isSlattern ? SlatternStaggerClipLength : StaggerUpClipLength) / 1.15f;
+                staggerDuration = (isSlattern ? SlatternStaggerClipLength : (isOtachi ? OtachiStaggerUpDownClipLength : StaggerUpClipLength)) / 1.15f;
             }
             else if (attackVariant == 1)
             {
@@ -2721,7 +3560,7 @@ namespace PacificRimWater
             {
                 float sideDot = knockback.sqrMagnitude > 0.01f ? Vector3.Dot(knockback.normalized, transform.right) : 0f;
                 targetStagger = sideDot >= 0f ? "StaggerRight" : "StaggerLeft";
-                staggerDuration = StaggerSideClipLength / 1.35f;
+                staggerDuration = (isOtachi ? OtachiStaggerSideClipLength : StaggerSideClipLength) / 1.35f;
             }
 
             if (Time.time - lastStaggerTime > 2.2f)
@@ -2734,7 +3573,7 @@ namespace PacificRimWater
             consecutiveStaggers++;
             lastStaggerTime = Time.time;
 
-            int staggerCap = isGuardBrokenStagger ? 5 : 4;
+            int staggerCap = isGuardBrokenStagger ? 5 : (isOtachi ? 3 : 4);
             // Combo-Breaker: allow full 3-hit light + heavy finisher (or 5th-hit break after Guard Break), then punish excessive stunlocking
             if (consecutiveStaggers >= staggerCap && !isUppercutFinisher)
             {
@@ -2747,6 +3586,13 @@ namespace PacificRimWater
                 else if (isSlattern && CurrentPhase == 3)
                 {
                     StartAttackPattern(AttackPattern.DeviousBlitzLightCombo);
+                }
+                else if (isOtachi)
+                {
+                    if (otachiTailWhipCooldown <= 0f && CurrentPhase <= 2)
+                        StartAttackPattern(AttackPattern.OtachiTailWhipPunish);
+                    else
+                        StartOtachiAcidRetreat(duration: 1.15f);
                 }
                 else if (Random.value < 0.65f)
                 {
@@ -2763,12 +3609,59 @@ namespace PacificRimWater
             TriggerStagger(targetStagger, staggerDuration);
         }
 
+        /// <summary>
+        /// Initializes Leatherback directly into Phase 3 with half HP (used after the
+        /// Harbor -> Hong Kong Neon transition cutscene).
+        /// </summary>
+        public void InitializePhase3HalfHealth(bool triggerSurgeFx = true)
+        {
+            if (IsDead) DebugResetBoss();
+            CancelActiveSequence();
+            CurrentPhase = 3;
+            currentHealth = maxHealth * 0.5f;
+            currentPoise = maxPoise;
+            consecutiveStaggers = 0;
+            hasHyperArmor = false;
+            empBuffEndTime = Time.time + 999f;
+            stateTimer = 0f;
+            currentState = IsAIDisabled ? AIState.Idle : AIState.ChasingAndStrafing;
+            isCutsceneMode = false;
+            currentBodyYaw = transform.eulerAngles.y;
+            bodyYawInitialized = true;
+            desiredVelocity = Vector3.zero;
+            if (rb != null && !rb.isKinematic)
+            {
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+            if (triggerSurgeFx)
+            {
+                PacificRimAudio.PacificRimAudioManager.Instance?.SetKaijuEmpSparksLoop(true, transform.position);
+            }
+            Debug.Log($"<color=#ff3333><b>[{kaijuDisplayName} PHASE 3 // HALF HP]</b></color> Initialized at Phase 3 with {currentHealth:F0}/{maxHealth:F0} HP.");
+        }
+
         private void ApplyHealthReduction(float dmg, Vector3 impulse)
         {
+            if (PacificRimCutscene.HarborToNeonTransitionState.IsAnyCutsceneRunning) return;
+
             currentHealth = Mathf.Max(0f, currentHealth - dmg);
             if (rb != null) rb.AddForce(impulse, ForceMode.Impulse);
 
             Debug.Log($"<color=#ff8800><b>[{kaijuDisplayName} Boss P{CurrentPhase}]</b></color> Hit for {dmg:F0} DMG! HP: {currentHealth:F0}/{maxHealth:F0}");
+
+            bool isHarborMission = !isSlattern && !isOtachi &&
+                PacificRimCutscene.HarborToNeonTransitionState.IsHarborScene(
+                    UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+
+            if (isHarborMission && CurrentPhase < 3 && currentHealth <= maxHealth * 0.30f)
+            {
+                currentHealth = Mathf.Max(currentHealth, maxHealth * 0.28f);
+                CancelActiveSequence();
+                CurrentPhase = 3;
+                PacificRimCutscene.HarborToNeonCutscene.TriggerFromPhase3(this);
+                return;
+            }
 
             if (currentHealth <= 0f)
             {
@@ -2795,7 +3688,7 @@ namespace PacificRimWater
             currentHealth = 0f;
             currentState = AIState.Dead;
             deathLoopEntered = false;
-            stateTimer = isSlattern ? SlatternDeathClipLength : DeathClipLength;
+            stateTimer = isSlattern ? SlatternDeathClipLength : (isOtachi ? OtachiDeathClipLength : DeathClipLength);
             desiredVelocity = Vector3.zero;
             SetLocomotionSpeed(1f);
             if (animator != null) animator.speed = 1.0f;
@@ -2820,6 +3713,14 @@ namespace PacificRimWater
                 // Allow Slattern's death collapse into the trench floor before starting the 38s Breach finale
                 yield return new WaitForSeconds(2.8f);
                 PacificRimCutscene.OperationPitfallEndingCutscene.StartFromSlatternDefeat();
+                yield break;
+            }
+
+            if (isOtachi && PacificRimCutscene.OtachiOutroCutscene.HasSceneCutscene)
+            {
+                // Allow Otachi's collapse onto the rain-slicked Hong Kong street before triggering the 45s Stratosphere Finale
+                yield return new WaitForSeconds(2.4f);
+                PacificRimCutscene.OtachiOutroCutscene.StartFromOtachiDefeat();
                 yield break;
             }
 
@@ -2865,7 +3766,12 @@ namespace PacificRimWater
 
         private static void EmitOceanImpact(Vector3 worldPos, Vector3 dir, float waveRadius, float waveStrength, float splashIntensity, bool isHeavy, float shakeIntensity)
         {
-            if (WaterSystem.Instance != null)
+            bool dryHere = WaterSystem.IsDryLandAt(worldPos, out float dryY);
+            if (dryHere)
+            {
+                worldPos.y = dryY + 0.05f;
+            }
+            else if (WaterSystem.Instance != null)
             {
                 worldPos.y = WaterSystem.Instance.GetWaterHeight(worldPos);
                 WaterSystem.Instance.AddFootstepWave(worldPos, waveRadius, waveStrength);
@@ -2879,7 +3785,7 @@ namespace PacificRimWater
                     WaterSplashManager.Instance.SpawnFootstepSplash(worldPos, splashIntensity);
             }
 
-            if (isHeavy && WaterSystem.Instance != null)
+            if (isHeavy && WaterSystem.Instance != null && !dryHere)
             {
                 ProceduralSplash.CreateFoamRing(worldPos, waveRadius * 1.05f, 2.2f);
             }
