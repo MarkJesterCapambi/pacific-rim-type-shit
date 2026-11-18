@@ -928,8 +928,8 @@ namespace PacificRimWater.Editor
             ai.slatternStalkMinDist = 33f;
             ai.slatternStalkIdealDist = 44f;
             ai.turnSpeed = 95f;
-            ai.attackTurnSpeed = 38f;
-            ai.acceleration = 4f;
+            ai.attackTurnSpeed = 110f;
+            ai.acceleration = 6.5f;
             ai.minCombatDistance = 17.5f;
             ai.meleeAttackRange = 24.5f;
             ai.sprintMinRange = 26f;

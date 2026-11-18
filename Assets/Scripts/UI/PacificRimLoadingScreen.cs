@@ -39,7 +39,7 @@ namespace PacificRimUI
             "DOUBLE-TAP [W A S D] FOR THRUSTER DASH",
             "SPRINT + [RMB] FOR UNINTERRUPTIBLE ROCKET LUNGE",
             "[R] DEPLOYS GD6 CHAIN SWORDS  ·  +DAMAGE & REACH",
-            "[T] FIRES I-19 PLASMACASTER  ·  REQUIRES 70% STAMINA",
+            "[T] FIRES I-19 PLASMACASTER  ·  EARN 100% ULTIMATE CHARGE IN COMBAT",
             "[Q] OVERCHARGE  ·  +30% ATTACK SPEED  ·  +25% DMG (15S)",
             "[E] TOGGLES FREECAM  ·  [~] HIDES HUD"
         };

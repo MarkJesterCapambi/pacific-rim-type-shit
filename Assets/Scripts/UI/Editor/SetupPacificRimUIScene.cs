@@ -45,7 +45,7 @@ namespace PacificRimUI.Editor
             new ControlEntry("HOLD F", "BLOCK", "Mitigates 80% DMG"),
             new ControlEntry("TAP F", "PERFECT PARRY", "0 DMG · +15% STM · Stagger", true),
             new ControlEntry("R", "CHAIN SWORDS", "+Damage & reach"),
-            new ControlEntry("T", "PLASMACASTER", "Requires 70% STM · 15s CD", true),
+            new ControlEntry("T", "PLASMACASTER", "Ultimate · Charge in combat", true),
             new ControlEntry("Q", "OVERCHARGE", "+30% Speed / +25% DMG · 15s", true),
             new ControlEntry("E", "FREECAM", "Inspect · Scroll to zoom"),
             new ControlEntry("~ / ESC", "HUD / PAUSE", "Hide HUD · Pause menu"),
@@ -414,6 +414,21 @@ namespace PacificRimUI.Editor
             BuildMatrixRow("GuardRow", brPanel.transform, -31f, "GUARD [F]", "READY", out var guardValTxt);
             BuildMatrixRow("CamRow", brPanel.transform, -52f, "CAM [E]", "0M", out var camValTxt);
 
+            // 8b. Bottom-Center Plasmacaster Ultimate Icon (Overwatch-style circular gauge)
+            var ultGo = CreateRect("BottomCenter_Ultimate", root.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 70f), new Vector2(124f, 124f));
+            SetPivot(ultGo, 0.5f, 0f);
+            var ultWidget = ultGo.AddComponent<PacificRimUltimateWidget>();
+            ultWidget.EnsureBuiltAndWired(
+                AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Resources/UI/PlasmaUlt_OuterRing.png"),
+                AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Resources/UI/PlasmaUlt_SegmentedRing.png"),
+                AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Resources/UI/PlasmaUlt_DashedRing.png"),
+                AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Resources/UI/PlasmaUlt_ReadyRing.png"),
+                AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Resources/UI/PlasmaUlt_ReadyAura.png"),
+                AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Resources/UI/PlasmaUlt_Icon.png"),
+                AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Resources/UI/PlasmaUlt_BadgeOutline.png"),
+                AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Resources/UI/PlasmaUlt_BadgeSolid.png"));
+            ultWidget.SetImmediate(0f, 0, false, false, "T");
+
             // 9. Bottom Footer Rule + Compact Action Prompt Strip
             var footerRule = CreateRect("HUD_BottomRule", root.transform, new Vector2(0.03f, 0f), new Vector2(0.97f, 0f), new Vector2(0f, 52f), new Vector2(0f, 14f));
             SetPivot(footerRule, 0.5f, 0.5f);
@@ -466,6 +481,7 @@ namespace PacificRimUI.Editor
             SetSerializedField(hud, "bladesPrompt", promptBlades);
             SetSerializedField(hud, "overchargePrompt", promptOver);
             SetSerializedField(hud, "plasmaPrompt", promptPlasma);
+            SetSerializedField(hud, "ultimateWidget", ultWidget);
             SetSerializedField(hud, "camPrompt", promptCam);
             SetSerializedField(hud, "menuPrompt", promptMenu);
             SetSerializedField(hud, "staminaCaptionText", staminaCaptionTxt);

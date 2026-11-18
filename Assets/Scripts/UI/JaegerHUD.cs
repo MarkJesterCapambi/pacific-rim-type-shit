@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 using PacificRimWater;
@@ -64,6 +66,9 @@ namespace PacificRimUI
         [SerializeField] private PacificRimKeyPrompt camPrompt;
         [SerializeField] private PacificRimKeyPrompt menuPrompt;
 
+        [Header("Plasmacaster Ultimate (Bottom-Center)")]
+        [SerializeField] private PacificRimUltimateWidget ultimateWidget;
+
         [Header("Notification Banner (Top-Center)")]
         [SerializeField] private CanvasGroup bannerGroup;
         [SerializeField] private Text bannerText;
@@ -106,6 +111,17 @@ namespace PacificRimUI
         private bool isCutsceneMode;
         private Coroutine neuralBootRoutine;
 
+        // Kaiju EMP / Slattern Emote HUD Glitch State
+        private bool wasHudGlitching;
+        private float glitchTickTimer;
+        private int glitchTickCounter;
+        private readonly Dictionary<RectTransform, Vector2> cachedBaseAnchoredPos = new Dictionary<RectTransform, Vector2>(24);
+        private bool hasCachedChassisBase;
+        private string cachedChassisBaseText;
+        private Color cachedChassisBaseColor;
+        private Image[] glitchScanBars;
+        private readonly StringBuilder glitchStringBuilder = new StringBuilder(32);
+
         // Admin UI toggle buffer ("hesoyam")
         private static int suppressFreeCamFrame = -1;
         public static bool SuppressFreeCamThisFrame => suppressFreeCamFrame == Time.frameCount;
@@ -141,6 +157,7 @@ namespace PacificRimUI
 
         private void OnDisable()
         {
+            ClearEmpGlitchEffect();
 #if ENABLE_INPUT_SYSTEM
             if (Keyboard.current != null)
             {
@@ -393,6 +410,7 @@ namespace PacificRimUI
             UpdateCombatTimer();
             UpdateScreenImpact();
             UpdateBanner();
+            UpdateEmpGlitchEffect();
         }
 
         private void SyncImmediate()
@@ -422,8 +440,20 @@ namespace PacificRimUI
 
             UpdateHullAndOvercharge();
             UpdateStamina();
+            EnsureUltimateWidgetUI();
+            if (ultimateWidget != null)
+            {
+                string keyStr = jaeger.plasmaCasterKey.ToString().ToUpperInvariant();
+                ultimateWidget.SetImmediate(
+                    jaeger.UltimateChargeRatio,
+                    jaeger.UltimateChargePercent,
+                    jaeger.IsUltimateReady,
+                    jaeger.IsPlasmaAiming,
+                    keyStr);
+            }
             UpdateCombatAndTelemetry();
             UpdateBossHealthBar();
+            ClearEmpGlitchEffect();
         }
 
         public void ShowBanner(string message, float duration = 2.5f)
@@ -646,11 +676,13 @@ namespace PacificRimUI
 
             UpdatePlasmaPrompt();
 
-            // Reticle state tint
+            // Reticle state tint (fade out during reverse Plasmacaster barrel cinematic)
             if (holoReticle != null)
             {
                 Color targetColor;
-                if (jaeger.IsPlasmaCharging)
+                if (jaeger.IsPlasmaCinematicActive)
+                    targetColor = new Color(0.40f, 0.98f, 1f, 0f);
+                else if (jaeger.IsPlasmaCharging)
                     targetColor = new Color(0.40f, 0.98f, 1f, 0.95f);
                 else if (blocking)
                     targetColor = new Color(PacificRimUITheme.BlueBright.r, PacificRimUITheme.BlueBright.g, PacificRimUITheme.BlueBright.b, 0.85f);
@@ -663,6 +695,29 @@ namespace PacificRimUI
 
                 holoReticle.color = Color.Lerp(holoReticle.color, targetColor, Time.deltaTime * 12f);
             }
+        }
+
+        private void EnsureUltimateWidgetUI()
+        {
+            if (ultimateWidget == null)
+            {
+                Transform existing = transform.Find("BottomCenter_Ultimate");
+                if (existing != null)
+                {
+                    ultimateWidget = existing.GetComponent<PacificRimUltimateWidget>();
+                    if (ultimateWidget == null)
+                    {
+                        ultimateWidget = existing.gameObject.AddComponent<PacificRimUltimateWidget>();
+                    }
+                }
+                else
+                {
+                    var go = new GameObject("BottomCenter_Ultimate", typeof(RectTransform));
+                    go.transform.SetParent(transform, false);
+                    ultimateWidget = go.AddComponent<PacificRimUltimateWidget>();
+                }
+            }
+            ultimateWidget.EnsureBuiltAndWired();
         }
 
         private void EnsurePlasmaPromptUI()
@@ -698,8 +753,9 @@ namespace PacificRimUI
 
         private void UpdatePlasmaPrompt()
         {
+            EnsureUltimateWidgetUI();
             EnsurePlasmaPromptUI();
-            if (plasmaPrompt == null || jaeger == null) return;
+            if (jaeger == null) return;
 
             bool keyChanged = jaeger.plasmaCasterKey != lastPlasmaKeyCodeCached || string.IsNullOrEmpty(lastPlasmaKeyCached);
             if (keyChanged)
@@ -708,6 +764,19 @@ namespace PacificRimUI
                 lastPlasmaKeyCached = lastPlasmaKeyCodeCached.ToString().ToUpperInvariant();
             }
             string keyStr = lastPlasmaKeyCached;
+
+            if (ultimateWidget != null)
+            {
+                ultimateWidget.UpdateState(
+                    jaeger.UltimateChargeRatio,
+                    jaeger.UltimateChargePercent,
+                    jaeger.IsUltimateReady,
+                    jaeger.IsPlasmaAiming,
+                    keyStr,
+                    Time.deltaTime);
+            }
+
+            if (plasmaPrompt == null) return;
 
             string label;
             bool highlight;
@@ -725,24 +794,17 @@ namespace PacificRimUI
                 highlight = true;
                 accent = PacificRimUITheme.Amber;
             }
-            else if (jaeger.PlasmaCooldownRemaining > 0.05f)
+            else if (jaeger.IsUltimateReady)
             {
-                int tenths = Mathf.CeilToInt(jaeger.PlasmaCooldownRemaining * 10f);
-                label = $"{tenths / 10}.{tenths % 10}S";
-                highlight = false;
-                accent = PacificRimUITheme.Amber;
-            }
-            else if (!jaeger.HasEnoughStaminaForPlasma)
-            {
-                label = "<70% STM";
-                highlight = false;
-                accent = PacificRimUITheme.Danger;
+                label = "ULT READY";
+                highlight = true;
+                accent = PacificRimUITheme.BlueBright;
             }
             else
             {
-                label = "PLASMA";
-                highlight = true;
-                accent = PacificRimUITheme.BlueBright;
+                label = $"{jaeger.UltimateChargePercent}%";
+                highlight = false;
+                accent = PacificRimUITheme.Amber;
             }
 
             if (keyChanged || label != lastPlasmaLabelCached)
@@ -1183,6 +1245,376 @@ namespace PacificRimUI
                     if (b != null) bestTimeText = b.GetComponent<Text>();
                 }
             }
+        }
+
+        private void UpdateEmpGlitchEffect()
+        {
+            bool shouldGlitch = !MainMenuUI.IsMenuOpen
+                && !isCutsceneMode
+                && !IsHudHidden
+                && kaiju != null
+                && kaiju.IsHudDisruptionActive
+                && jaeger != null
+                && !jaeger.IsDead;
+
+            if (!shouldGlitch)
+            {
+                if (wasHudGlitching)
+                {
+                    ClearEmpGlitchEffect();
+                }
+                return;
+            }
+
+            if (!wasHudGlitching)
+            {
+                wasHudGlitching = true;
+                glitchTickTimer = 0f;
+                glitchTickCounter = 1;
+                CacheGlitchBaselines();
+
+                string alertMsg = kaiju.isSlattern
+                    ? "<color=#ff645a><b>ABYSSAL RESONANCE  ·  HUD TELEMETRY DISRUPTED</b></color>"
+                    : "<color=#46c3ff><b>BIO-EMP INTERFERENCE  ·  HUD TELEMETRY DISRUPTED</b></color>";
+                ShowBanner(alertMsg, 2.3f);
+                PacificRimAudio.PacificRimAudioManager.Instance?.PlayUiClick();
+            }
+
+            glitchTickTimer -= Time.deltaTime;
+            if (glitchTickTimer <= 0f)
+            {
+                glitchTickTimer = Random.Range(0.038f, 0.068f);
+                glitchTickCounter++;
+            }
+
+            float tickSeed = glitchTickCounter * 17.31f;
+            Color accentGlitch = kaiju.isSlattern ? PacificRimUITheme.Danger : PacificRimUITheme.BlueBright;
+
+            // Flicker player & boss numeric readouts
+            GlitchNumberText(hullNumberText, tickSeed + 1.1f, 7f, 2f, accentGlitch, scrambleChance: 0.42f);
+            GlitchNumberText(staminaValueText, tickSeed + 2.3f, 5f, 1.5f, accentGlitch, scrambleChance: 0.40f);
+            GlitchNumberText(bossHpNumberText, tickSeed + 3.7f, 6f, 1.5f, accentGlitch, scrambleChance: 0.38f);
+            GlitchNumberText(overchargeTimerText, tickSeed + 4.9f, 4f, 1f, accentGlitch, scrambleChance: 0.35f);
+            GlitchNumberText(combatTimerText, tickSeed + 6.1f, 5f, 1f, accentGlitch, scrambleChance: 0.35f);
+            GlitchNumberText(bestTimeText, tickSeed + 7.3f, 3.5f, 1f, accentGlitch, scrambleChance: 0.25f);
+            GlitchNumberText(depthTelemetryText, tickSeed + 8.5f, 4.5f, 1f, accentGlitch, scrambleChance: 0.38f);
+
+            // Flicker HP, Stamina, Boss, Poise & Overcharge bars
+            GlitchBar(hullBar, tickSeed + 11.1f, accentGlitch);
+            GlitchBar(staminaBar, tickSeed + 12.7f, accentGlitch);
+            GlitchBar(bossHealthBar, tickSeed + 14.3f, accentGlitch);
+            GlitchBar(bossSubBar, tickSeed + 15.9f, accentGlitch);
+            if (overchargeContainer != null && overchargeContainer.activeSelf)
+            {
+                GlitchBar(overchargeBar, tickSeed + 17.5f, accentGlitch);
+            }
+
+            // Flicker status captions & combat matrix labels
+            GlitchLabelText(hullCaptionText, tickSeed + 21.1f, "SIGNAL ERR", 0.24f, accentGlitch);
+            GlitchLabelText(staminaCaptionText, tickSeed + 22.3f, "SYNC LOSS", 0.22f, accentGlitch);
+            GlitchLabelText(combatStanceValueText, tickSeed + 23.5f, "ERR//0xF", 0.28f, accentGlitch);
+            GlitchLabelText(defenseMatrixValueText, tickSeed + 24.7f, "STATIC", 0.28f, accentGlitch);
+            GlitchLabelText(bossPhaseText, tickSeed + 25.9f, "INTERFERENCE", 0.20f, accentGlitch);
+            GlitchLabelText(bossStatusText, tickSeed + 27.1f, kaiju.isSlattern ? "RESONANCE" : "EMP DISCHARGE", 0.25f, accentGlitch);
+            GlitchLabelText(chassisLabelText, tickSeed + 28.3f, "DRIFT LINK UNSTABLE", 0.26f, accentGlitch);
+
+            // Flicker holographic center reticle
+            if (holoReticle != null)
+            {
+                float rHash = Hash01(tickSeed + 31.7f);
+                RectTransform rRt = holoReticle.rectTransform;
+                CacheRectBasePos(rRt);
+                if (cachedBaseAnchoredPos.TryGetValue(rRt, out Vector2 basePos))
+                {
+                    float jx = (Hash01(tickSeed + 32.1f) - 0.5f) * 10f;
+                    float jy = (Hash01(tickSeed + 33.4f) - 0.5f) * 6f;
+                    rRt.anchoredPosition = basePos + new Vector2(jx, jy);
+                }
+                rRt.localEulerAngles = new Vector3(0f, 0f, (Hash01(tickSeed + 34.9f) - 0.5f) * 22f);
+
+                Color c = rHash < 0.22f
+                    ? new Color(PacificRimUITheme.Danger.r, PacificRimUITheme.Danger.g, PacificRimUITheme.Danger.b, 0.85f)
+                    : (rHash < 0.50f
+                        ? new Color(accentGlitch.r, accentGlitch.g, accentGlitch.b, 0.22f)
+                        : new Color(0.85f, 0.98f, 1f, 0.88f));
+                holoReticle.color = c;
+            }
+
+            UpdateGlitchScanBars(tickSeed, accentGlitch);
+        }
+
+        private void ClearEmpGlitchEffect()
+        {
+            if (!wasHudGlitching && glitchScanBars == null) return;
+            wasHudGlitching = false;
+
+            foreach (var kvp in cachedBaseAnchoredPos)
+            {
+                if (kvp.Key != null)
+                {
+                    kvp.Key.anchoredPosition = kvp.Value;
+                }
+            }
+
+            if (holoReticle != null)
+            {
+                holoReticle.rectTransform.localEulerAngles = Vector3.zero;
+            }
+
+            if (chassisLabelText != null && hasCachedChassisBase)
+            {
+                chassisLabelText.text = cachedChassisBaseText;
+                chassisLabelText.color = cachedChassisBaseColor;
+            }
+
+            hullBar?.SetGlitchVisual(false);
+            staminaBar?.SetGlitchVisual(false);
+            bossHealthBar?.SetGlitchVisual(false);
+            bossSubBar?.SetGlitchVisual(false);
+            overchargeBar?.SetGlitchVisual(false);
+
+            if (glitchScanBars != null)
+            {
+                for (int i = 0; i < glitchScanBars.Length; i++)
+                {
+                    if (glitchScanBars[i] != null && glitchScanBars[i].gameObject.activeSelf)
+                    {
+                        glitchScanBars[i].gameObject.SetActive(false);
+                    }
+                }
+            }
+        }
+
+        private void CacheGlitchBaselines()
+        {
+            CacheRectBasePos(hullNumberText != null ? hullNumberText.rectTransform : null);
+            CacheRectBasePos(staminaValueText != null ? staminaValueText.rectTransform : null);
+            CacheRectBasePos(bossHpNumberText != null ? bossHpNumberText.rectTransform : null);
+            CacheRectBasePos(overchargeTimerText != null ? overchargeTimerText.rectTransform : null);
+            CacheRectBasePos(combatTimerText != null ? combatTimerText.rectTransform : null);
+            CacheRectBasePos(bestTimeText != null ? bestTimeText.rectTransform : null);
+            CacheRectBasePos(depthTelemetryText != null ? depthTelemetryText.rectTransform : null);
+            CacheRectBasePos(hullCaptionText != null ? hullCaptionText.rectTransform : null);
+            CacheRectBasePos(staminaCaptionText != null ? staminaCaptionText.rectTransform : null);
+            CacheRectBasePos(combatStanceValueText != null ? combatStanceValueText.rectTransform : null);
+            CacheRectBasePos(defenseMatrixValueText != null ? defenseMatrixValueText.rectTransform : null);
+            CacheRectBasePos(bossPhaseText != null ? bossPhaseText.rectTransform : null);
+            CacheRectBasePos(bossStatusText != null ? bossStatusText.rectTransform : null);
+            CacheRectBasePos(chassisLabelText != null ? chassisLabelText.rectTransform : null);
+            CacheRectBasePos(holoReticle != null ? holoReticle.rectTransform : null);
+
+            CacheRectBasePos(hullBar != null ? hullBar.GetComponent<RectTransform>() : null);
+            CacheRectBasePos(staminaBar != null ? staminaBar.GetComponent<RectTransform>() : null);
+            CacheRectBasePos(bossHealthBar != null ? bossHealthBar.GetComponent<RectTransform>() : null);
+            CacheRectBasePos(bossSubBar != null ? bossSubBar.GetComponent<RectTransform>() : null);
+            CacheRectBasePos(overchargeBar != null ? overchargeBar.GetComponent<RectTransform>() : null);
+
+            if (chassisLabelText != null && !hasCachedChassisBase)
+            {
+                cachedChassisBaseText = chassisLabelText.text;
+                cachedChassisBaseColor = chassisLabelText.color;
+                hasCachedChassisBase = true;
+            }
+        }
+
+        private void CacheRectBasePos(RectTransform rt)
+        {
+            if (rt == null || cachedBaseAnchoredPos.ContainsKey(rt)) return;
+            cachedBaseAnchoredPos[rt] = rt.anchoredPosition;
+        }
+
+        private void GlitchNumberText(Text txt, float seed, float maxOffsetX, float maxOffsetY, Color accentColor, float scrambleChance)
+        {
+            if (txt == null) return;
+            CacheRectBasePos(txt.rectTransform);
+
+            float h1 = Hash01(seed);
+            float h2 = Hash01(seed + 5.3f);
+            float h3 = Hash01(seed + 9.7f);
+
+            if (cachedBaseAnchoredPos.TryGetValue(txt.rectTransform, out Vector2 basePos))
+            {
+                Vector2 offset = h1 < 0.65f
+                    ? new Vector2((h2 - 0.5f) * 2f * maxOffsetX, (h3 - 0.5f) * 2f * maxOffsetY)
+                    : Vector2.zero;
+                txt.rectTransform.anchoredPosition = basePos + offset;
+            }
+
+            if (h1 < scrambleChance && !string.IsNullOrEmpty(txt.text))
+            {
+                txt.text = ScrambleNumericString(txt.text, seed + 13.1f);
+            }
+
+            Color c = txt.color;
+            if (h2 < 0.14f)
+            {
+                c.a = 0.06f; // Brief digital dropout blink
+            }
+            else if (h2 < 0.42f)
+            {
+                c = h3 < 0.5f ? PacificRimUITheme.Danger : accentColor;
+                c.a = Mathf.Lerp(0.55f, 1.0f, Hash01(seed + 17.7f));
+            }
+            else if (h2 < 0.68f)
+            {
+                c.a = Mathf.Lerp(0.28f, 0.72f, Hash01(seed + 23.9f));
+            }
+            txt.color = c;
+        }
+
+        private void GlitchLabelText(Text txt, float seed, string errorAlias, float corruptChance, Color accentColor)
+        {
+            if (txt == null) return;
+            CacheRectBasePos(txt.rectTransform);
+
+            float h1 = Hash01(seed);
+            float h2 = Hash01(seed + 3.9f);
+
+            if (cachedBaseAnchoredPos.TryGetValue(txt.rectTransform, out Vector2 basePos))
+            {
+                Vector2 offset = h1 < 0.5f
+                    ? new Vector2((h2 - 0.5f) * 6f, 0f)
+                    : Vector2.zero;
+                txt.rectTransform.anchoredPosition = basePos + offset;
+            }
+
+            if (h1 < corruptChance)
+            {
+                txt.text = errorAlias;
+                txt.color = h2 < 0.5f ? PacificRimUITheme.Danger : accentColor;
+            }
+            else if (h2 < 0.25f)
+            {
+                Color c = txt.color;
+                c.a *= 0.25f;
+                txt.color = c;
+            }
+        }
+
+        private void GlitchBar(PacificRimBar bar, float seed, Color accentColor)
+        {
+            if (bar == null) return;
+
+            RectTransform rt = bar.GetComponent<RectTransform>();
+            CacheRectBasePos(rt);
+
+            float h1 = Hash01(seed);
+            float h2 = Hash01(seed + 4.1f);
+            float h3 = Hash01(seed + 8.9f);
+
+            if (rt != null && cachedBaseAnchoredPos.TryGetValue(rt, out Vector2 basePos))
+            {
+                Vector2 offset = h1 < 0.6f
+                    ? new Vector2((h2 - 0.5f) * 8f, (h3 - 0.5f) * 2f)
+                    : Vector2.zero;
+                rt.anchoredPosition = basePos + offset;
+            }
+
+            float ratioOffset = h1 < 0.55f ? Mathf.Lerp(-0.26f, 0.22f, h2) : 0f;
+            float alphaMult = h3 < 0.16f ? 0.12f : (h3 < 0.45f ? 0.48f : 1.0f);
+
+            Color? tint = null;
+            if (h2 < 0.25f) tint = PacificRimUITheme.Danger;
+            else if (h2 < 0.48f) tint = accentColor;
+            else if (h2 > 0.88f) tint = Color.white;
+
+            bar.SetGlitchVisual(true, ratioOffset, alphaMult, tint);
+        }
+
+        private string ScrambleNumericString(string src, float seed)
+        {
+            const string glitchChars = "08#?-!";
+            glitchStringBuilder.Length = 0;
+            for (int i = 0; i < src.Length; i++)
+            {
+                char ch = src[i];
+                if (char.IsDigit(ch))
+                {
+                    float h = Hash01(seed + i * 3.71f);
+                    if (h < 0.65f)
+                    {
+                        int idx = Mathf.Clamp(Mathf.FloorToInt(Hash01(seed + i * 7.13f) * glitchChars.Length), 0, glitchChars.Length - 1);
+                        glitchStringBuilder.Append(glitchChars[idx]);
+                    }
+                    else
+                    {
+                        glitchStringBuilder.Append(ch);
+                    }
+                }
+                else
+                {
+                    glitchStringBuilder.Append(ch);
+                }
+            }
+            return glitchStringBuilder.ToString();
+        }
+
+        private void EnsureGlitchScanBars()
+        {
+            if (glitchScanBars != null) return;
+
+            const int barCount = 3;
+            glitchScanBars = new Image[barCount];
+            for (int i = 0; i < barCount; i++)
+            {
+                GameObject go = new GameObject($"HUD_GlitchScanBar_{i}", typeof(RectTransform), typeof(Image));
+                go.transform.SetParent(transform, false);
+                var img = go.GetComponent<Image>();
+                img.raycastTarget = false;
+                img.color = Color.clear;
+                go.SetActive(false);
+                glitchScanBars[i] = img;
+            }
+        }
+
+        private void UpdateGlitchScanBars(float seed, Color accentColor)
+        {
+            EnsureGlitchScanBars();
+            if (glitchScanBars == null) return;
+
+            for (int i = 0; i < glitchScanBars.Length; i++)
+            {
+                Image img = glitchScanBars[i];
+                if (img == null) continue;
+
+                float hVisible = Hash01(seed + i * 19.3f);
+                if (hVisible > 0.58f)
+                {
+                    if (img.gameObject.activeSelf) img.gameObject.SetActive(false);
+                    continue;
+                }
+
+                if (!img.gameObject.activeSelf) img.gameObject.SetActive(true);
+
+                // Place thin scanline bursts in peripheral HUD regions (top/bottom edges, never blocking center view)
+                float hY = Hash01(seed + i * 29.1f);
+                float hX = Hash01(seed + i * 41.7f);
+                float hW = Hash01(seed + i * 53.3f);
+                float bandY = (i == 0)
+                    ? Mathf.Lerp(0.84f, 0.96f, hY)
+                    : (i == 1 ? Mathf.Lerp(0.05f, 0.22f, hY) : Mathf.Lerp(0.10f, 0.90f, hY));
+
+                float widthFrac = Mathf.Lerp(0.14f, 0.42f, hW);
+                float minX = (i == 2 && bandY > 0.28f && bandY < 0.72f)
+                    ? (hX < 0.5f ? 0.02f : 0.78f) // side margins only if near mid-screen height
+                    : Mathf.Lerp(0.02f, 0.96f - widthFrac, hX);
+
+                RectTransform rt = img.rectTransform;
+                rt.anchorMin = new Vector2(minX, bandY);
+                rt.anchorMax = new Vector2(Mathf.Min(0.98f, minX + widthFrac), bandY);
+                rt.offsetMin = new Vector2(0f, -1.5f);
+                rt.offsetMax = new Vector2(0f, 1.5f);
+
+                Color c = Hash01(seed + i * 71.9f) < 0.38f ? PacificRimUITheme.Danger : accentColor;
+                c.a = Mathf.Lerp(0.09f, 0.24f, Hash01(seed + i * 83.1f));
+                img.color = c;
+            }
+        }
+
+        private static float Hash01(float x)
+        {
+            float s = Mathf.Sin(x * 12.9898f + 78.233f) * 43758.5453f;
+            return s - Mathf.Floor(s);
         }
     }
 }

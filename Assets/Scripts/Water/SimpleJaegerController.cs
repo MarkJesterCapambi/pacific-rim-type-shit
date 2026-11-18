@@ -96,6 +96,7 @@ namespace PacificRimWater
         [Tooltip("Lockout duration in seconds where no attacks can be launched after taking an unblocked hit.")]
         public float hitAttackLockoutDuration = 0.15f;
         private float hitAttackDisallowedUntil = -10f;
+        private float hitReactionEndTime = -10f;
         private Coroutine activeDelayedStrikeCoroutine = null;
         private float sprintAttackEndTime = -10f;
 
@@ -105,6 +106,7 @@ namespace PacificRimWater
         private Vector3 lungeVelocity = Vector3.zero;
 
         public bool IsHitStaggered => Time.time < hitAttackDisallowedUntil;
+        public bool IsHitReacting => Time.time < hitReactionEndTime;
         public bool IsSprintAttacking => Time.time < sprintAttackEndTime;
 
         [Header("Cutscene & Deployment Mode")]
@@ -144,24 +146,33 @@ namespace PacificRimWater
         public float chainswordStunMultiplier = 0.70f;
         public float chainswordExtraRange = 2.5f;
         public float EffectiveChainswordExtraRange => Mathf.Max(chainswordExtraRange, 0f);
-        public float plasmaDamage = 320f;
-        public float plasmaCooldown = 15f;
-        [Tooltip("Fraction of maxStamina consumed when the I-19 Plasmacaster fires (0.70 = 70%). Firing is blocked below this threshold.")]
-        [Range(0.05f, 1f)]
-        public float plasmaStaminaFraction = 0.70f;
+        [Header("I-19 Plasmacaster Ultimate")]
+        public float plasmaDamage = 213f;
+        public float maxUltimateCharge = 100f;
+        [Tooltip("Progress toward the I-19 Plasmacaster Ultimate (always resets to a flat 0 on spawn).")]
+        public float currentUltimateCharge = 0f;
+        public float ultChargeLightHit = 6f;
+        public float ultChargeBlockedHit = 2.5f;
+        public float ultChargeHeavyHit = 12f;
+        public float ultChargeGuardBreakBonus = 4f;
+        public float ultChargeParry = 18f;
+        public float ultChargeBlock = 4f;
+        public float ultChargeDashEvade = 10f;
         public float plasmaBoltSpeed = 135f;
+        [HideInInspector] public float plasmaCooldown = 15f;
+        [HideInInspector, Range(0.05f, 1f)] public float plasmaStaminaFraction = 0.70f;
 
         [Header("Plasma Caster Charge & IK Rework")]
         [Tooltip("Base windup duration (seconds) before the I-19 Plasmacaster discharges.")]
-        public float plasmaChargeDuration = 1.25f;
+        public float plasmaChargeDuration = 2.35f;
         [Tooltip("Extra charge-up delay (seconds) added each time Gipsy is hit while charging.")]
         public float plasmaChargeHitPenalty = 0.15f;
         [Tooltip("Incoming damage multiplier while charging the I-19 Plasmacaster.")]
         public float plasmaChargeDamageMultiplier = 2.0f;
         [Tooltip("Recoil follow-through duration (seconds) after discharge.")]
-        public float plasmaRecoilDuration = 0.38f;
+        public float plasmaRecoilDuration = 0.48f;
         [Tooltip("Smooth return-to-stance duration (seconds) after recoil.")]
-        public float plasmaRecoverDuration = 0.42f;
+        public float plasmaRecoverDuration = 0.55f;
         [Tooltip("Movement speed multiplier while charging the Plasmacaster.")]
         public float plasmaChargeMoveMultiplier = 0.42f;
         [Tooltip("Movement speed multiplier during Plasmacaster discharge recoil.")]
@@ -260,7 +271,9 @@ namespace PacificRimWater
         private float plasmaPhaseElapsed = 0f;
         private float lastPlasmaDeniedBannerTime = -10f;
         private float lastPlasmaHitBannerTime = -10f;
+        private bool plasmaSuppressedSwordL = false;
         private bool plasmaSuppressedSwordR = false;
+        private bool plasmaLockedOnKaiju = false;
         private Vector3 plasmaTargetPos;
         private Vector3 plasmaSolvedBarrelPos;
         private Vector3 plasmaSolvedAimDir = Vector3.forward;
@@ -277,6 +290,7 @@ namespace PacificRimWater
         private Vector2 dashLocalDir = Vector2.zero;
         private Vector3 dashWorldDir = Vector3.forward;
         private float dashStartTime = -10f;
+        private float lastDashEvadeChargeTime = -10f;
 
         // Smoothed procedural IK blend weights (prevent popping when abilities start/stop/interrupt)
         private float plasmaIKWeight = 0f;
@@ -293,14 +307,32 @@ namespace PacificRimWater
         public bool IsPlasmaAiming => plasmaState != PlasmaState.Idle;
         public bool IsPlasmaCharging => plasmaState == PlasmaState.Charging;
         public bool IsPlasmaRecoil => plasmaState == PlasmaState.FiringRecoil;
+        public bool IsPlasmaRecovering => plasmaState == PlasmaState.Recovering;
+        public bool IsPlasmaCinematicActive => plasmaState != PlasmaState.Idle && !IsDead;
         public float PlasmaCurrentChargeDuration => plasmaState == PlasmaState.Charging ? plasmaCurrentChargeDuration : plasmaChargeDuration;
         public float PlasmaChargeProgress => plasmaState == PlasmaState.Charging
             ? Mathf.Clamp01(plasmaChargeElapsed / Mathf.Max(0.01f, plasmaCurrentChargeDuration))
             : 0f;
-        public float PlasmaCooldownRemaining => Mathf.Max(0f, (lastPlasmaTime + plasmaCooldown) - Time.time);
-        public float PlasmaCooldownRatio => plasmaCooldown > 0.01f ? Mathf.Clamp01(1f - (PlasmaCooldownRemaining / plasmaCooldown)) : 1f;
-        public float RequiredPlasmaStamina => maxStamina * Mathf.Clamp(plasmaStaminaFraction, 0.05f, 1f);
-        public bool HasEnoughStaminaForPlasma => !IsExhausted && currentStamina >= RequiredPlasmaStamina - 0.01f;
+        public float PlasmaRecoilProgress => plasmaState == PlasmaState.FiringRecoil
+            ? Mathf.Clamp01(plasmaPhaseElapsed / Mathf.Max(0.01f, plasmaRecoilDuration))
+            : 0f;
+        public float PlasmaRecoverProgress => plasmaState == PlasmaState.Recovering
+            ? Mathf.Clamp01(plasmaPhaseElapsed / Mathf.Max(0.01f, plasmaRecoverDuration))
+            : 0f;
+        public Transform RightUpperArmTransform => upperArmR;
+        public Transform RightForearmTransform => forearmR;
+        public Transform RightHandTransform => handR;
+        public Vector3 JaegerChestWorldPos => chest != null ? chest.position : (transform.position + Vector3.up * 14f);
+        public Vector3 PlasmaBarrelMuzzleWorldPos => plasmaSolvedBarrelPos.sqrMagnitude > 0.01f ? plasmaSolvedBarrelPos : ComputeSolvedBarrelMuzzlePos();
+        public Vector3 PlasmaAimDirectionWorld => plasmaSolvedAimDir.sqrMagnitude > 0.01f ? plasmaSolvedAimDir : transform.forward;
+        public float UltimateCharge => Mathf.Clamp(currentUltimateCharge, 0f, Mathf.Max(1f, maxUltimateCharge));
+        public float UltimateChargeRatio => maxUltimateCharge > 0.01f ? Mathf.Clamp01(currentUltimateCharge / maxUltimateCharge) : 0f;
+        public int UltimateChargePercent => IsUltimateReady ? 100 : Mathf.Clamp(Mathf.FloorToInt(UltimateChargeRatio * 100f + 0.0001f), 0, 99);
+        public bool IsUltimateReady => !IsDead && currentUltimateCharge >= Mathf.Max(1f, maxUltimateCharge) - 0.001f;
+        public float PlasmaCooldownRemaining => 0f;
+        public float PlasmaCooldownRatio => UltimateChargeRatio;
+        public float RequiredPlasmaStamina => 0f;
+        public bool HasEnoughStaminaForPlasma => IsUltimateReady;
         public bool IsDashing => Time.time < dashEndTime;
 
         private float lastHorizontalInput = 0f;
@@ -354,10 +386,27 @@ namespace PacificRimWater
             IsExhausted = false;
         }
 
-        public void DebugResetPlasmaCooldown()
+        public void AddUltimateCharge(float amount)
         {
+            if (IsDead || amount <= 0f) return;
+            float maxUlt = Mathf.Max(1f, maxUltimateCharge);
+            bool wasReady = currentUltimateCharge >= maxUlt - 0.001f;
+            currentUltimateCharge = Mathf.Clamp(currentUltimateCharge + amount, 0f, maxUlt);
+            bool isNowReady = currentUltimateCharge >= maxUlt - 0.001f;
+            if (!wasReady && isNowReady)
+            {
+                PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDStaminaRecovered35();
+                PacificRimUI.JaegerHUD.Instance?.ShowBanner($"I-19 PLASMACASTER // ULTIMATE READY [{plasmaCasterKey.ToString().ToUpperInvariant()}]", 2.2f);
+            }
+        }
+
+        public void DebugFillUltimateCharge()
+        {
+            currentUltimateCharge = Mathf.Max(1f, maxUltimateCharge);
             lastPlasmaTime = -999f;
         }
+
+        public void DebugResetPlasmaCooldown() => DebugFillUltimateCharge();
 
         public void DebugActivateOvercharge()
         {
@@ -385,6 +434,7 @@ namespace PacificRimWater
         }
 
         private JaegerVisualSockets visualSockets;
+        private JaegerBattleDamageVFX battleDamageVfx;
 
         void Awake()
         {
@@ -397,13 +447,14 @@ namespace PacificRimWater
             currentStamina = maxStamina;
             IsExhausted = false;
             exhaustionRecoveryThreshold = maxStamina * exhaustionRecoveryRatio;
-            plasmaCooldown = Mathf.Max(0.5f, plasmaCooldown);
-            plasmaStaminaFraction = Mathf.Clamp(plasmaStaminaFraction, 0.05f, 1f);
+            maxUltimateCharge = Mathf.Max(1f, maxUltimateCharge);
+            currentUltimateCharge = 0f;
             lastPlasmaTime = -999f;
             waterInteraction = GetComponent<JaegerWaterInteraction>();
             if (animator == null) animator = GetComponent<Animator>();
             cachedKaiju = FindAnyObjectByType<KaijuAI>();
             visualSockets = GetComponent<JaegerVisualSockets>() ?? GetComponentInChildren<JaegerVisualSockets>();
+            battleDamageVfx = GetComponent<JaegerBattleDamageVFX>() ?? gameObject.AddComponent<JaegerBattleDamageVFX>();
             ResolveRigTransforms();
             areChainswordsActive = false;
             EnsureChainswordVisuals();
@@ -418,6 +469,7 @@ namespace PacificRimWater
                 Destroy(activePlasmaChargeRoot);
                 activePlasmaChargeRoot = null;
             }
+            FreezeKaijuForPlasma(false);
             if (Instance == this) Instance = null;
         }
 
@@ -658,7 +710,7 @@ namespace PacificRimWater
                 ToggleChainswords();
             }
 
-            // Plasma Caster fire (T) - 15s cooldown & >= 70% stamina required
+            // Plasma Caster Ultimate fire (T) - requires 100% earned Ultimate charge
             if (plasmaTriggered)
             {
                 TryTriggerPlasmaCaster();
@@ -757,8 +809,23 @@ namespace PacificRimWater
             }
 
             // Turn rotation & omnidirectional velocity
-            Vector2 moveInput = Vector2.ClampMagnitude(new Vector2(horizontal, vertical), 1f);
-            if (enableStrafeAndLegIK)
+            Vector2 moveInput = IsPlasmaAiming
+                ? Vector2.zero
+                : Vector2.ClampMagnitude(new Vector2(horizontal, vertical), 1f);
+            if (IsPlasmaAiming)
+            {
+                Vector3 aimFlat = GetLockedPlasmaTargetPos() - transform.position;
+                aimFlat.y = 0f;
+                if (aimFlat.sqrMagnitude > 0.01f)
+                {
+                    float targetAimYaw = Mathf.Atan2(aimFlat.x, aimFlat.z) * Mathf.Rad2Deg;
+                    currentBodyYaw = Mathf.SmoothDampAngle(currentBodyYaw, targetAimYaw, ref yawTurnVelocity, 0.14f, 360f);
+                    Quaternion bodyRot = Quaternion.Euler(0f, currentBodyYaw, 0f);
+                    transform.rotation = bodyRot;
+                    if (rb != null) rb.rotation = bodyRot;
+                }
+            }
+            else if (enableStrafeAndLegIK)
             {
                 if (cameraFollow == null && Camera.main != null)
                 {
@@ -790,9 +857,13 @@ namespace PacificRimWater
 
             currentRunBlend = Mathf.MoveTowards(currentRunBlend, effectivelyRunning ? 1f : 0f, Time.deltaTime * Mathf.Max(0.2f, runTransitionSpeed));
 
-            // Movement velocity target (40% speed while emoting)
+            // Movement velocity target (40% speed while emoting, planted steady stance during Ultimate cinematic)
             Vector3 moveVec;
-            if (enableStrafeAndLegIK)
+            if (IsPlasmaAiming)
+            {
+                moveVec = Vector3.zero;
+            }
+            else if (enableStrafeAndLegIK)
             {
                 moveVec = transform.forward * moveInput.y + transform.right * (moveInput.x * strafeSpeedMultiplier);
             }
@@ -808,18 +879,14 @@ namespace PacificRimWater
             {
                 currentSpeed *= 0.40f;
             }
-            else if (plasmaState == PlasmaState.Charging)
+            else if (plasmaState == PlasmaState.Charging || plasmaState == PlasmaState.FiringRecoil)
             {
-                currentSpeed *= plasmaChargeMoveMultiplier;
-            }
-            else if (plasmaState == PlasmaState.FiringRecoil)
-            {
-                currentSpeed *= plasmaRecoilMoveMultiplier;
+                currentSpeed = 0f;
             }
             else if (plasmaState == PlasmaState.Recovering)
             {
                 float recT = Mathf.Clamp01(plasmaPhaseElapsed / Mathf.Max(0.01f, plasmaRecoverDuration));
-                currentSpeed *= Mathf.Lerp(plasmaRecoilMoveMultiplier, 1.0f, recT);
+                currentSpeed *= Mathf.Lerp(0f, 1.0f, recT);
             }
             else
             {
@@ -874,8 +941,8 @@ namespace PacificRimWater
                 if (animator.layerCount > 1)
                 {
                     bool isMoving = moveMagnitude > 0.1f;
-                    // Lower body layer (Hips down) overrides locomotion while attacking, blocking, or emoting on the move
-                    float targetLowerWeight = (isMoving && (isAttacking || isBlocking || isEmotingNow)) ? 1.0f : 0.0f;
+                    // Lower body layer (Hips down) overrides locomotion while attacking, blocking, emoting, or reacting to hits on the move
+                    float targetLowerWeight = (isMoving && (isAttacking || isBlocking || isEmotingNow || IsHitReacting)) ? 1.0f : 0.0f;
                     lowerBodyLayerWeight = Mathf.MoveTowards(lowerBodyLayerWeight, targetLowerWeight, Time.deltaTime * 12.0f);
                     animator.SetLayerWeight(1, lowerBodyLayerWeight);
                 }
@@ -1523,6 +1590,23 @@ namespace PacificRimWater
                             Vector3 knockback = transform.forward * knockbackDist;
                             kaiju.TakeDamage(effectiveDamage, knockback, attackVariant, rawStrikePos, stunMult);
                             damagedKaiju = true;
+
+                            if (!kaiju.LastHitWasParried && kaiju.LastHitDealtDamage)
+                            {
+                                bool isHeavyStrike = attackVariant >= 4;
+                                if (kaiju.LastHitBrokeGuard)
+                                {
+                                    AddUltimateCharge(ultChargeHeavyHit + ultChargeGuardBreakBonus);
+                                }
+                                else if (kaiju.LastHitWasBlocked)
+                                {
+                                    AddUltimateCharge(ultChargeBlockedHit);
+                                }
+                                else
+                                {
+                                    AddUltimateCharge(isHeavyStrike ? ultChargeHeavyHit : ultChargeLightHit);
+                                }
+                            }
                         }
                         didHit = true;
                     }
@@ -1534,6 +1618,30 @@ namespace PacificRimWater
             }
 
             return didHit;
+        }
+
+        private void PlayHitReactionAnimation(bool isHitLeft, float duration = 0.58f)
+        {
+            combatStanceEndTime = Mathf.Max(combatStanceEndTime, Time.time + combatStancePersistDuration);
+            inCombatStance = true;
+            hitReactionEndTime = Time.time + duration;
+
+            if (animator == null) return;
+
+            animator.ResetTrigger("HitLeft");
+            animator.ResetTrigger("HitRight");
+            animator.SetBool("InCombat", true);
+
+            string targetState = isHitLeft ? "HitLeft" : "HitRight";
+            animator.CrossFadeInFixedTime(targetState, 0.08f, 0, 0f);
+
+            if (animator.layerCount > 1)
+            {
+                bool isMoving = lastMoveMagnitude > 0.1f;
+                float targetLower = isMoving ? 1f : 0f;
+                lowerBodyLayerWeight = targetLower;
+                animator.SetLayerWeight(1, targetLower);
+            }
         }
 
         public void OnParriedByKaiju(Vector3 recoilImpulse, Vector3 sparkWorldPos)
@@ -1552,16 +1660,7 @@ namespace PacificRimWater
             CancelPlasmaCaster(immediate: false);
             ResetAttackTriggers();
 
-            if (animator != null)
-            {
-                animator.CrossFade("HitRight", 0.05f, 0);
-                animator.SetTrigger("HitRight");
-                if (animator.layerCount > 1)
-                {
-                    lowerBodyLayerWeight = 0f;
-                    animator.SetLayerWeight(1, 0f);
-                }
-            }
+            PlayHitReactionAnimation(isHitLeft: false, duration: 0.58f);
 
             if (rb == null) rb = GetComponent<Rigidbody>();
             if (rb != null && recoilImpulse.sqrMagnitude > 0.01f)
@@ -1583,6 +1682,11 @@ namespace PacificRimWater
             if (IsDead || IsGodModeActive) return;
             if (IsDashing)
             {
+                if (Time.time - lastDashEvadeChargeTime >= dashDuration + 0.15f)
+                {
+                    lastDashEvadeChargeTime = Time.time;
+                    AddUltimateCharge(ultChargeDashEvade);
+                }
                 Debug.Log("<color=#00e5ff><b>[Jaeger THRUSTER EVADE]</b></color> Dodged incoming Kaiju strike!");
                 return;
             }
@@ -1618,6 +1722,7 @@ namespace PacificRimWater
                     PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDStaminaRecovered35();
                 }
                 lastStaminaSpendTime = Time.time - staminaRegenDelay;
+                AddUltimateCharge(ultChargeParry);
 
                 // Stagger enemy without damaging enemy
                 if (cachedKaiju == null) cachedKaiju = FindAnyObjectByType<KaijuAI>();
@@ -1647,6 +1752,7 @@ namespace PacificRimWater
             else if (blockedHit)
             {
                 ConsumeStamina(isHeavy ? blockHeavyStaminaCost : blockLightStaminaCost);
+                AddUltimateCharge(isHeavy ? ultChargeBlock * 1.5f : ultChargeBlock);
                 actualAmount = amount * (1f - Mathf.Clamp01(blockDamageReduction));
                 if (animator != null)
                 {
@@ -1750,18 +1856,7 @@ namespace PacificRimWater
                     isHitLeft = Random.value < 0.5f;
                 }
 
-                if (animator != null)
-                {
-                    string targetState = isHitLeft ? "HitLeft" : "HitRight";
-                    animator.CrossFade(targetState, 0.06f, 0);
-                    animator.SetTrigger(targetState);
-
-                    if (animator.layerCount > 1)
-                    {
-                        lowerBodyLayerWeight = 0f;
-                        animator.SetLayerWeight(1, 0f);
-                    }
-                }
+                PlayHitReactionAnimation(isHitLeft, duration: 0.58f);
 
                 Debug.Log($"<color=#ff4444><b>[Jaeger STAGGER]</b></color> Hit {(isHitLeft ? "LEFT" : "RIGHT")}! Playing {(isHitLeft ? "HitLeft" : "HitRight")}. Attacks locked for {hitAttackLockoutDuration:F2}s.");
             }
@@ -2130,26 +2225,13 @@ namespace PacificRimWater
                 return false;
             }
 
-            float cooldownRemaining = PlasmaCooldownRemaining;
-            if (cooldownRemaining > 0.01f)
+            if (!IsUltimateReady)
             {
                 if (Time.unscaledTime - lastPlasmaDeniedBannerTime > 0.85f)
                 {
                     lastPlasmaDeniedBannerTime = Time.unscaledTime;
-                    PacificRimUI.JaegerHUD.Instance?.ShowBanner($"I-19 PLASMACASTER // COOLING DOWN ({cooldownRemaining:0.0}S)", 1.35f);
+                    PacificRimUI.JaegerHUD.Instance?.ShowBanner($"I-19 PLASMACASTER // ULTIMATE CHARGING ({UltimateChargePercent}%)", 1.35f);
                     PacificRimAudio.PacificRimAudioManager.Instance?.PlayUiClick();
-                }
-                return false;
-            }
-
-            if (!HasEnoughStaminaForPlasma)
-            {
-                if (Time.unscaledTime - lastPlasmaDeniedBannerTime > 0.85f)
-                {
-                    lastPlasmaDeniedBannerTime = Time.unscaledTime;
-                    int reqPct = Mathf.RoundToInt(Mathf.Clamp(plasmaStaminaFraction, 0.05f, 1f) * 100f);
-                    PacificRimUI.JaegerHUD.Instance?.ShowBanner($"I-19 PLASMACASTER // {reqPct}% STAMINA REQUIRED", 1.5f);
-                    PacificRimAudio.PacificRimAudioManager.Instance?.PlayHUDStaminaDepleted();
                 }
                 return false;
             }
@@ -2158,29 +2240,45 @@ namespace PacificRimWater
             return true;
         }
 
+        private void FreezeKaijuForPlasma(bool freeze)
+        {
+            if (cachedKaiju == null) cachedKaiju = FindAnyObjectByType<KaijuAI>();
+            if (cachedKaiju != null)
+            {
+                cachedKaiju.SetUltimateTimeFreeze(freeze, Mathf.Max(2.5f, plasmaCurrentChargeDuration + 1.5f));
+            }
+        }
+
+        private Vector3 GetLockedPlasmaTargetPos()
+        {
+            if (plasmaLockedOnKaiju && cachedKaiju != null && !cachedKaiju.IsDead)
+            {
+                return GetKaijuTorsoTarget(cachedKaiju);
+            }
+            return plasmaTargetPos;
+        }
+
         private void StartPlasmaCasterCharge()
         {
+            ResolveRigTransforms();
             plasmaState = PlasmaState.Charging;
             plasmaAimStartTime = Time.time;
             plasmaChargeElapsed = 0f;
-            plasmaCurrentChargeDuration = Mathf.Max(0.45f, plasmaChargeDuration);
+            plasmaCurrentChargeDuration = Mathf.Max(2.35f, plasmaChargeDuration);
             plasmaPhaseElapsed = 0f;
+            float effectiveRecoilDur = Mathf.Max(0.48f, plasmaRecoilDuration);
+            float effectiveRecoverDur = Mathf.Max(0.55f, plasmaRecoverDuration);
             plasmaFireTime = Time.time + plasmaCurrentChargeDuration;
-            plasmaAimEndTime = plasmaFireTime + Mathf.Max(0.2f, plasmaRecoilDuration) + Mathf.Max(0.2f, plasmaRecoverDuration);
+            plasmaAimEndTime = plasmaFireTime + effectiveRecoilDur + effectiveRecoverDur;
             combatStanceEndTime = Time.time + combatStancePersistDuration;
 
-            // Suppress right chainsword blade during Plasmacaster reconfiguration
-            if (areChainswordsActive && chainswordBladeR != null && chainswordBladeR.activeSelf)
-            {
-                plasmaSuppressedSwordR = true;
-                chainswordBladeR.SetActive(false);
-            }
-            else
-            {
-                plasmaSuppressedSwordR = false;
-            }
+            // Temporarily hide both deployed Chainsword blades during the Plasmacaster Ultimate
+            SuppressChainswordsForPlasma();
 
             plasmaTargetPos = ResolvePlasmaAimTarget();
+            plasmaLockedOnKaiju = cachedKaiju != null && !cachedKaiju.IsDead &&
+                Vector3.Distance(plasmaTargetPos, GetKaijuTorsoTarget(cachedKaiju)) < 28f;
+            FreezeKaijuForPlasma(true);
 
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayHydraulicServo(transform.position + Vector3.up * 13f, 0.95f);
             PacificRimAudio.PacificRimAudioManager.Instance?.PlayArmorCreak(transform.position + Vector3.up * 13.5f, 0.55f);
@@ -2219,7 +2317,9 @@ namespace PacificRimWater
 
             DestroyPlasmaChargeVfx();
             ClearPlasmaCameraTremor();
+            FreezeKaijuForPlasma(false);
             plasmaState = PlasmaState.Idle;
+            plasmaLockedOnKaiju = false;
             plasmaChargeElapsed = 0f;
             plasmaPhaseElapsed = 0f;
             plasmaRecoilKick = 0f;
@@ -2232,16 +2332,59 @@ namespace PacificRimWater
                 plasmaFingerOpenWeight = 0f;
             }
 
-            RestoreSuppressedRightChainsword();
+            RestoreSuppressedChainswords();
         }
 
-        private void RestoreSuppressedRightChainsword()
+        private void SuppressChainswordsForPlasma()
         {
-            if (!plasmaSuppressedSwordR) return;
-            plasmaSuppressedSwordR = false;
-            if (!IsDead && areChainswordsActive && chainswordBladeR != null)
+            if (activeChainswordAnimCoroutine != null)
             {
-                chainswordBladeR.SetActive(true);
+                StopCoroutine(activeChainswordAnimCoroutine);
+                activeChainswordAnimCoroutine = null;
+                chainswordDeployAnimEndTime = -10f;
+            }
+
+            plasmaSuppressedSwordL = false;
+            plasmaSuppressedSwordR = false;
+
+            if (!areChainswordsActive) return;
+
+            EnsureChainswordVisuals();
+            if (chainswordBladeL != null)
+            {
+                chainswordBladeL.transform.localPosition = swordDeployedPosL;
+                chainswordBladeL.transform.localRotation = swordDeployedRotL;
+                chainswordBladeL.transform.localScale = swordDeployedScaleL;
+                chainswordBladeL.SetActive(false);
+                plasmaSuppressedSwordL = true;
+            }
+            if (chainswordBladeR != null)
+            {
+                chainswordBladeR.transform.localPosition = swordDeployedPosR;
+                chainswordBladeR.transform.localRotation = swordDeployedRotR;
+                chainswordBladeR.transform.localScale = swordDeployedScaleR;
+                chainswordBladeR.SetActive(false);
+                plasmaSuppressedSwordR = true;
+            }
+        }
+
+        private void RestoreSuppressedChainswords()
+        {
+            if (plasmaSuppressedSwordL)
+            {
+                plasmaSuppressedSwordL = false;
+                if (!IsDead && areChainswordsActive && chainswordBladeL != null)
+                {
+                    chainswordBladeL.SetActive(true);
+                }
+            }
+            if (plasmaSuppressedSwordR)
+            {
+                plasmaSuppressedSwordR = false;
+                if (!IsDead && areChainswordsActive && chainswordBladeR != null)
+                {
+                    chainswordBladeR.SetActive(true);
+                }
             }
         }
 
@@ -2563,6 +2706,7 @@ namespace PacificRimWater
                 {
                     DestroyPlasmaChargeVfx();
                     ClearPlasmaCameraTremor();
+                    FreezeKaijuForPlasma(false);
                     yield break;
                 }
 
@@ -2621,22 +2765,26 @@ namespace PacificRimWater
             ClearPlasmaCameraTremor();
             if (this == null || IsDead)
             {
+                FreezeKaijuForPlasma(false);
                 plasmaState = PlasmaState.Idle;
-                RestoreSuppressedRightChainsword();
+                RestoreSuppressedChainswords();
                 yield break;
             }
 
-            // --- Stage 2: Discharge (Consume 70% Stamina & Start 15s Cooldown ON SHOT) ---
+            // --- Stage 2: Discharge (Expend 100% Ultimate Charge ON SHOT) ---
             ResolveHandTransforms();
-            plasmaTargetPos = ResolvePlasmaAimTarget();
+            plasmaTargetPos = GetLockedPlasmaTargetPos();
             Vector3 muzzleBase = ComputeSolvedBarrelMuzzlePos();
             Vector3 dir = (plasmaTargetPos - muzzleBase);
             if (dir.sqrMagnitude < 0.01f) dir = transform.forward;
             dir.Normalize();
             Vector3 muzzlePos = muzzleBase + dir * 0.9f;
 
-            // Spend 70% of maxStamina at the moment of discharge
-            ConsumeStamina(RequiredPlasmaStamina);
+            // Unfreeze the Kaiju right as the bolt launches so it visibly takes impact & staggers
+            FreezeKaijuForPlasma(false);
+
+            // Reset Ultimate Charge to flat 0 at the moment of discharge
+            currentUltimateCharge = 0f;
             lastPlasmaTime = Time.time;
 
             plasmaState = PlasmaState.FiringRecoil;
@@ -2669,7 +2817,7 @@ namespace PacificRimWater
             LaunchPlasmaProjectile(muzzlePos, dir);
 
             // --- Stage 3: Recoil & Hydraulic Recovery ---
-            float recoilDur = Mathf.Max(0.2f, plasmaRecoilDuration);
+            float recoilDur = Mathf.Max(0.48f, plasmaRecoilDuration);
             bool postSteam = false;
             while (plasmaPhaseElapsed < recoilDur && plasmaState == PlasmaState.FiringRecoil)
             {
@@ -2689,7 +2837,7 @@ namespace PacificRimWater
                 plasmaPhaseElapsed = 0f;
                 PacificRimAudio.PacificRimAudioManager.Instance?.PlayHydraulicServo(transform.position + Vector3.up * 13f, 0.75f);
 
-                float recoverDur = Mathf.Max(0.2f, plasmaRecoverDuration);
+                float recoverDur = Mathf.Max(0.55f, plasmaRecoverDuration);
                 while (plasmaPhaseElapsed < recoverDur && plasmaState == PlasmaState.Recovering)
                 {
                     if (this == null || IsDead) yield break;
@@ -2701,7 +2849,7 @@ namespace PacificRimWater
             if (plasmaState == PlasmaState.Recovering)
             {
                 plasmaState = PlasmaState.Idle;
-                RestoreSuppressedRightChainsword();
+                RestoreSuppressedChainswords();
             }
             activePlasmaCoroutine = null;
         }
@@ -2861,7 +3009,7 @@ namespace PacificRimWater
                 {
                     float dmg = IsPoweredUp ? plasmaDamage * 1.25f : plasmaDamage;
                     if (IsIronmanCheatActive) dmg *= 3f;
-                    cachedKaiju.TakeDamage(dmg, dir * 46f, attackVariant: 4, hitPoint: hitPos, stunMultiplier: 1.35f);
+                    cachedKaiju.TakeDamage(dmg, dir * 46f, attackVariant: 4, hitPoint: hitPos, stunMultiplier: 1.35f, unblockable: true);
                     PacificRimAudio.PacificRimAudioManager.Instance?.PlayLightningStrike(hitPos);
                     PacificRimAudio.PacificRimAudioManager.Instance?.PlayJaegerPunchHit(hitPos, isHeavy: true);
                     WaterSplashManager.Instance?.SpawnParrySparks(hitPos, -dir);
@@ -3057,7 +3205,7 @@ namespace PacificRimWater
             {
                 if (plasmaState == PlasmaState.Charging)
                 {
-                    plasmaTargetPos = ResolvePlasmaAimTarget();
+                    plasmaTargetPos = GetLockedPlasmaTargetPos();
                 }
 
                 float w = Mathf.SmoothStep(0f, 1f, plasmaIKWeight);
@@ -3105,7 +3253,7 @@ namespace PacificRimWater
                 float reach = l1 + l2;
 
                 float deployT = plasmaState == PlasmaState.Charging
-                    ? Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(chargeU / 0.30f))
+                    ? Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(chargeU / 0.24f))
                     : 1f;
 
                 Vector3 chamberWristPos = shoulder

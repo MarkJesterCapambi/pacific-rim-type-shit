@@ -454,7 +454,7 @@ namespace PacificRimUI
             CreateActionButton(jaegerActs1, "SWORDS", () => InvokeJaeger(j => j.DebugToggleChainswords()), 28f, 11);
 
             var jaegerActs2 = CreateHorizontalRow(content, 28f, 6f);
-            CreateActionButton(jaegerActs2, "RESET PLASMA", () => InvokeJaeger(j => { j.DebugResetPlasmaCooldown(); ShowToast("ADMIN // PLASMA READY"); }), 28f, 11);
+            CreateActionButton(jaegerActs2, "FILL PLASMA ULT", () => InvokeJaeger(j => { j.DebugFillUltimateCharge(); ShowToast("ADMIN // PLASMA ULT 100%"); }), 28f, 11);
             CreateActionButton(jaegerActs2, "TEST DMG -200", () => InvokeJaeger(j => j.DebugApplyDamage(200f)), 28f, 11, PacificRimUITheme.Amber);
 
             // 4. SIMULATION & VIEW

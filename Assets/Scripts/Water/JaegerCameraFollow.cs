@@ -89,6 +89,23 @@ namespace PacificRimWater
         private JaegerWaterInteraction targetWater;
         private Transform cachedTarget;
 
+        // Plasmacaster mini-cinematic state
+        private bool wasPlasmaCinematicActive;
+        private Vector3 plasmaCamStartPos;
+        private Quaternion plasmaCamStartRot;
+        private float plasmaCamStartFov;
+        private Vector3 plasmaCamLastPos;
+        private Quaternion plasmaCamLastRot;
+        private float plasmaCamLastFov;
+        private Vector3 plasmaRecoilStartPos;
+        private Quaternion plasmaRecoilStartRot;
+        private float plasmaRecoilStartFov;
+        private bool plasmaRecoilCaptured;
+        private Vector3 plasmaRecoverStartPos;
+        private Quaternion plasmaRecoverStartRot;
+        private float plasmaRecoverStartFov;
+        private bool plasmaRecoverCaptured;
+
         public float CurrentYaw
         {
             get => currentYaw;
@@ -161,8 +178,11 @@ namespace PacificRimWater
                 else return;
             }
 
-            // Freecam toggle via 'E' key
-            if (!PacificRimUI.MainMenuUI.IsMenuOpen && !PacificRimUI.PacificRimAdminUI.IsOpen && !PacificRimUI.JaegerHUD.SuppressFreeCamThisFrame && WasFreeCamTogglePressedThisFrame())
+            var jaegerCtrl = SimpleJaegerController.Instance;
+            bool isPlasmaCinematic = jaegerCtrl != null && jaegerCtrl.IsPlasmaCinematicActive && activeCutsceneTransition == null;
+
+            // Freecam toggle via 'E' key (locked during Plasmacaster mini-cinematic)
+            if (!isPlasmaCinematic && !PacificRimUI.MainMenuUI.IsMenuOpen && !PacificRimUI.PacificRimAdminUI.IsOpen && !PacificRimUI.JaegerHUD.SuppressFreeCamThisFrame && WasFreeCamTogglePressedThisFrame())
             {
                 ToggleFreeCam();
             }
@@ -171,7 +191,7 @@ namespace PacificRimWater
             float mouseDeltaX = 0f;
             float mouseDeltaY = 0f;
 
-            if (enableMouseLook)
+            if (enableMouseLook && !isPlasmaCinematic)
             {
                 try
                 {
@@ -194,7 +214,7 @@ namespace PacificRimWater
 #endif
             }
 
-            if (enableMouseLook)
+            if (enableMouseLook && !isPlasmaCinematic)
             {
                 currentYaw += mouseDeltaX * mouseSensitivity;
                 currentPitch -= mouseDeltaY * mouseSensitivity;
@@ -243,15 +263,12 @@ namespace PacificRimWater
             }
 
             // Sprint-heavy jump attack & I-19 Plasmacaster dynamic camera framing
-            var jaegerCtrl = SimpleJaegerController.Instance;
             bool isSprintAttacking = !isFreeCam && jaegerCtrl != null && jaegerCtrl.IsSprintAttacking;
             bool isPlasmaCharging = !isFreeCam && jaegerCtrl != null && jaegerCtrl.IsPlasmaCharging;
             bool isPlasmaRecoil = !isFreeCam && jaegerCtrl != null && jaegerCtrl.IsPlasmaRecoil;
-            float targetExtraDist = isSprintAttacking ? attackZoomExtraDistance : (isPlasmaCharging ? -2.2f * jaegerCtrl.PlasmaChargeProgress : 0f);
-            float targetExtraFov = isSprintAttacking ? attackZoomExtraFOV
-                : (isPlasmaCharging ? -3.6f * jaegerCtrl.PlasmaChargeProgress
-                : (isPlasmaRecoil ? 2.4f : 0f));
-            float zoomRate = (isSprintAttacking || isPlasmaRecoil) ? 7.5f : (isPlasmaCharging ? 4.5f : 3.0f);
+            float targetExtraDist = isSprintAttacking ? attackZoomExtraDistance : 0f;
+            float targetExtraFov = isSprintAttacking ? attackZoomExtraFOV : 0f;
+            float zoomRate = isSprintAttacking ? 7.5f : 3.0f;
             currentAttackExtraDist = Mathf.Lerp(currentAttackExtraDist, targetExtraDist, Time.deltaTime * zoomRate);
             currentAttackExtraFov = Mathf.Lerp(currentAttackExtraFov, targetExtraFov, Time.deltaTime * zoomRate);
 
@@ -355,8 +372,205 @@ namespace PacificRimWater
                 ? targetRotation
                 : (lookDir.sqrMagnitude > 0.0001f ? Quaternion.LookRotation(lookDir.normalized, Vector3.up) : targetRotation);
 
+            if (isPlasmaCinematic)
+            {
+                if (!wasPlasmaCinematicActive)
+                {
+                    wasPlasmaCinematicActive = true;
+                    plasmaCamStartPos = transform.position;
+                    plasmaCamStartRot = transform.rotation;
+                    plasmaCamStartFov = cam != null ? cam.fieldOfView : baseFieldOfView;
+                    plasmaCamLastPos = plasmaCamStartPos;
+                    plasmaCamLastRot = plasmaCamStartRot;
+                    plasmaCamLastFov = plasmaCamStartFov;
+                    plasmaRecoilCaptured = false;
+                    plasmaRecoverCaptured = false;
+                }
+
+                Vector3 otsPos = desiredPosition;
+                Quaternion otsLook = (aimPoint - otsPos).sqrMagnitude > 0.0001f
+                    ? Quaternion.LookRotation((aimPoint - otsPos).normalized, Vector3.up)
+                    : baseRotation;
+
+                EvaluatePlasmaCinematicCamera(
+                    jaegerCtrl,
+                    otsPos,
+                    otsLook,
+                    baseFieldOfView,
+                    out Vector3 cinePos,
+                    out Quaternion cineRot,
+                    out float cineFov);
+
+                if (cam != null)
+                {
+                    cam.fieldOfView = cineFov;
+                }
+                transform.position = cinePos + cineRot * shakeLocalOffset;
+                transform.rotation = cineRot * Quaternion.Euler(shakeRotOffset);
+                smoothedBasePos = desiredPosition;
+                currentVelocity = Vector3.zero;
+                return;
+            }
+            else if (wasPlasmaCinematicActive)
+            {
+                wasPlasmaCinematicActive = false;
+                plasmaRecoilCaptured = false;
+                plasmaRecoverCaptured = false;
+                smoothedBasePos = desiredPosition;
+                currentVelocity = Vector3.zero;
+                if (cam != null) cam.fieldOfView = baseFieldOfView;
+            }
+
             transform.position = smoothedBasePos + baseRotation * (swayLocalPos + shakeLocalOffset);
             transform.rotation = baseRotation * Quaternion.Euler(swayEuler + shakeRotOffset);
+        }
+
+        private void EvaluatePlasmaCinematicCamera(
+            SimpleJaegerController jaegerCtrl,
+            Vector3 otsPos,
+            Quaternion otsRot,
+            float otsFov,
+            out Vector3 outPos,
+            out Quaternion outRot,
+            out float outFov)
+        {
+            Vector3 aimDir = jaegerCtrl.PlasmaAimDirectionWorld;
+            if (aimDir.sqrMagnitude < 0.001f) aimDir = jaegerCtrl.transform.forward;
+            aimDir.Normalize();
+
+            Vector3 sideRight = Vector3.Cross(Vector3.up, aimDir);
+            if (sideRight.sqrMagnitude < 0.001f) sideRight = jaegerCtrl.transform.right;
+            sideRight.Normalize();
+
+            Vector3 chestPos = jaegerCtrl.JaegerChestWorldPos;
+            Vector3 shoulderPos = jaegerCtrl.RightUpperArmTransform != null
+                ? jaegerCtrl.RightUpperArmTransform.position
+                : (chestPos + sideRight * 2.6f);
+            Vector3 elbowPos = jaegerCtrl.RightForearmTransform != null
+                ? jaegerCtrl.RightForearmTransform.position
+                : Vector3.Lerp(shoulderPos, jaegerCtrl.PlasmaBarrelMuzzleWorldPos, 0.5f);
+            Vector3 muzzlePos = jaegerCtrl.PlasmaBarrelMuzzleWorldPos;
+
+            // Stage 1 end / Stage 2 start: right shoulder framing looking forward down the barrel arm
+            Vector3 shoulderCamPos = shoulderPos - aimDir * 2.8f + sideRight * 3.8f + Vector3.up * 1.9f;
+            Vector3 shoulderLookAt = muzzlePos + aimDir * 3.5f;
+            Quaternion shoulderCamRot = Quaternion.LookRotation((shoulderLookAt - shoulderCamPos).normalized, Vector3.up)
+                                      * Quaternion.Euler(0f, 0f, -4.0f);
+
+            if (jaegerCtrl.IsPlasmaCharging)
+            {
+                float u = jaegerCtrl.PlasmaChargeProgress;
+
+                if (u <= 0.24f)
+                {
+                    // Phase 1: Standard over-the-shoulder -> tracking onto Gipsy's right shoulder
+                    float t1 = Mathf.SmoothStep(0f, 1f, u / 0.24f);
+                    outPos = Vector3.Lerp(plasmaCamStartPos, shoulderCamPos, t1);
+                    outRot = Quaternion.Slerp(plasmaCamStartRot, shoulderCamRot, t1);
+                    outFov = Mathf.Lerp(plasmaCamStartFov, 44f, t1);
+                }
+                else if (u <= 0.58f)
+                {
+                    // Phase 2: Camera treks forward along the right arm (shoulder -> elbow -> splayed muzzle)
+                    float t2 = Mathf.SmoothStep(0f, 1f, (u - 0.24f) / 0.34f);
+                    Vector3 armPoint = t2 < 0.5f
+                        ? Vector3.Lerp(shoulderPos, elbowPos, t2 * 2f)
+                        : Vector3.Lerp(elbowPos, muzzlePos, (t2 - 0.5f) * 2f);
+                    Vector3 armOffset = sideRight * Mathf.Lerp(3.8f, 3.1f, t2)
+                                      + Vector3.up * Mathf.Lerp(1.9f, 1.0f, t2)
+                                      - aimDir * Mathf.Lerp(2.8f, 0.0f, t2);
+                    outPos = armPoint + armOffset;
+
+                    Vector3 look2 = Vector3.Lerp(muzzlePos + aimDir * 3.5f, muzzlePos + aimDir * 0.4f, t2);
+                    Quaternion rawRot2 = Quaternion.LookRotation((look2 - outPos).normalized, Vector3.up);
+                    outRot = rawRot2 * Quaternion.Euler(0f, 0f, Mathf.Lerp(-4.0f, -6.5f, t2));
+                    outFov = Mathf.Lerp(44f, 41f, t2);
+                }
+                else
+                {
+                    // Phase 3: Sweep around the tip of the barrel to face Gipsy head-on ("about to shoot the camera")
+                    float rawT3 = Mathf.Clamp01((u - 0.58f) / 0.42f);
+                    float arcT = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(rawT3 / 0.67f));
+                    float pushT = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((rawT3 - 0.62f) / 0.38f));
+
+                    Vector3 vStart = sideRight * 3.1f + Vector3.up * 1.0f;
+                    float frontDist = Mathf.Lerp(7.4f, 6.7f, pushT);
+                    Vector3 vEnd = aimDir * frontDist + sideRight * 0.42f - Vector3.up * 0.52f;
+
+                    Vector3 arcDir = Vector3.Slerp(vStart.normalized, vEnd.normalized, arcT);
+                    float arcRad = Mathf.Lerp(vStart.magnitude, vEnd.magnitude, arcT);
+                    outPos = muzzlePos + arcDir * arcRad;
+
+                    Vector3 barrelSideLook = muzzlePos + aimDir * 0.4f;
+                    Vector3 downBarrelLook = Vector3.Lerp(muzzlePos, chestPos + Vector3.up * 0.85f, 0.34f);
+                    Vector3 look3 = Vector3.Lerp(barrelSideLook, downBarrelLook, arcT);
+
+                    Quaternion rawRot3 = Quaternion.LookRotation((look3 - outPos).normalized, Vector3.up);
+                    outRot = rawRot3 * Quaternion.Euler(0f, 0f, Mathf.Lerp(-6.5f, 2.2f, arcT));
+                    outFov = Mathf.Lerp(41f, 46f, arcT);
+                }
+            }
+            else if (jaegerCtrl.IsPlasmaRecoil)
+            {
+                if (!plasmaRecoilCaptured)
+                {
+                    plasmaRecoilCaptured = true;
+                    plasmaRecoilStartPos = plasmaCamLastPos;
+                    plasmaRecoilStartRot = plasmaCamLastRot;
+                    plasmaRecoilStartFov = plasmaCamLastFov;
+                }
+
+                float r = jaegerCtrl.PlasmaRecoilProgress;
+                float kickEnv = Mathf.Sin(Mathf.Clamp01(r) * Mathf.PI * 0.5f);
+                // Punch backward & widen FOV slightly as the plasma bolt streaks past the lens
+                outPos = plasmaRecoilStartPos + aimDir * (2.2f * kickEnv) + Vector3.up * (0.45f * kickEnv);
+                Vector3 lookTarget = Vector3.Lerp(muzzlePos, chestPos + Vector3.up * 0.85f, 0.34f);
+                Quaternion baseRecoilRot = Quaternion.LookRotation((lookTarget - outPos).normalized, Vector3.up) * Quaternion.Euler(0f, 0f, 2.2f);
+                outRot = Quaternion.Slerp(plasmaRecoilStartRot, baseRecoilRot, Mathf.Clamp01(r * 2f));
+                outFov = Mathf.Lerp(plasmaRecoilStartFov, 55f, kickEnv);
+            }
+            else
+            {
+                // Phase 4: Smoothly sweep back from the front-on barrel shot to standard over-the-shoulder
+                if (!plasmaRecoverCaptured)
+                {
+                    plasmaRecoverCaptured = true;
+                    plasmaRecoverStartPos = plasmaCamLastPos;
+                    plasmaRecoverStartRot = plasmaCamLastRot;
+                    plasmaRecoverStartFov = plasmaCamLastFov;
+                }
+
+                float recT = Mathf.SmoothStep(0f, 1f, jaegerCtrl.PlasmaRecoverProgress);
+                // Swing laterally around Gipsy's right side during return so camera never passes through Gipsy's chest
+                Vector3 sideApex = chestPos + sideRight * 14f + Vector3.up * 4.5f - aimDir * 4f;
+                Vector3 p01 = Vector3.Lerp(plasmaRecoverStartPos, sideApex, recT);
+                Vector3 p12 = Vector3.Lerp(sideApex, otsPos, recT);
+                outPos = Vector3.Lerp(p01, p12, recT);
+
+                // Pan gaze smoothly from Gipsy's muzzle/chest -> past right shoulder -> over-the-shoulder aim point (avoids 180-deg Slerp flip)
+                Vector3 lookStart = Vector3.Lerp(muzzlePos, chestPos + Vector3.up * 0.85f, 0.34f);
+                Vector3 lookMid = chestPos + aimDir * 16f + sideRight * 2f;
+                Vector3 lookEnd = otsPos + (otsRot * Vector3.forward) * 60f;
+                Vector3 l01 = Vector3.Lerp(lookStart, lookMid, recT);
+                Vector3 l12 = Vector3.Lerp(lookMid, lookEnd, recT);
+                Vector3 lookRec = Vector3.Lerp(l01, l12, recT);
+
+                Vector3 recDir = (lookRec - outPos);
+                Quaternion baseRecRot = recDir.sqrMagnitude > 0.0001f
+                    ? Quaternion.LookRotation(recDir.normalized, Vector3.up) * Quaternion.Euler(0f, 0f, Mathf.Lerp(2.2f, 0f, recT))
+                    : otsRot;
+                outRot = recT < 0.15f
+                    ? Quaternion.Slerp(plasmaRecoverStartRot, baseRecRot, recT / 0.15f)
+                    : (recT > 0.85f ? Quaternion.Slerp(baseRecRot, otsRot, (recT - 0.85f) / 0.15f) : baseRecRot);
+                outFov = Mathf.Lerp(plasmaRecoverStartFov, otsFov, recT);
+            }
+
+            float minFloorY = jaegerCtrl.transform.position.y + 2.8f;
+            if (outPos.y < minFloorY) outPos.y = minFloorY;
+
+            plasmaCamLastPos = outPos;
+            plasmaCamLastRot = outRot;
+            plasmaCamLastFov = outFov;
         }
 
         public void ToggleFreeCam()
@@ -479,7 +693,8 @@ namespace PacificRimWater
 
         void OnGUI()
         {
-            if (PacificRimUI.MainMenuUI.IsMenuOpen || !showCrosshair || Event.current.type != EventType.Repaint) return;
+            var jaegerCtrl = SimpleJaegerController.Instance;
+            if (PacificRimUI.MainMenuUI.IsMenuOpen || !showCrosshair || (jaegerCtrl != null && jaegerCtrl.IsPlasmaCinematicActive) || Event.current.type != EventType.Repaint) return;
 
             float cx = Screen.width * 0.5f;
             float cy = Screen.height * 0.5f;

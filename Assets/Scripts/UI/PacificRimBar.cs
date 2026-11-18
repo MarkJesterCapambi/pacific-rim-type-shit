@@ -16,6 +16,10 @@ namespace PacificRimUI
         private float targetRatio = 1f;
         private float currentRatio = 1f;
         private bool ratioInitialized;
+        private bool isGlitching;
+        private float glitchRatioOffset;
+        private bool hasCachedBgColor;
+        private Color cachedBgColor;
 
         public float FillRatio => currentRatio;
 
@@ -26,7 +30,7 @@ namespace PacificRimUI
             {
                 currentRatio = targetRatio;
                 ratioInitialized = true;
-                ApplyRatio(currentRatio);
+                ApplyRatio(isGlitching ? Mathf.Clamp01(currentRatio + glitchRatioOffset) : currentRatio);
             }
         }
 
@@ -35,7 +39,45 @@ namespace PacificRimUI
             targetRatio = Mathf.Clamp01(ratio);
             currentRatio = targetRatio;
             ratioInitialized = true;
-            ApplyRatio(currentRatio);
+            ApplyRatio(isGlitching ? Mathf.Clamp01(currentRatio + glitchRatioOffset) : currentRatio);
+        }
+
+        public void SetGlitchVisual(bool active, float ratioOffset = 0f, float alphaMultiplier = 1f, Color? tintOverride = null)
+        {
+            if (backgroundImage != null && !hasCachedBgColor)
+            {
+                cachedBgColor = backgroundImage.color;
+                hasCachedBgColor = true;
+            }
+
+            isGlitching = active;
+            glitchRatioOffset = ratioOffset;
+
+            if (!active)
+            {
+                ApplyRatio(currentRatio);
+                if (backgroundImage != null && hasCachedBgColor)
+                {
+                    backgroundImage.color = cachedBgColor;
+                }
+                return;
+            }
+
+            ApplyRatio(Mathf.Clamp01(currentRatio + glitchRatioOffset));
+
+            if (fillImage != null)
+            {
+                Color c = tintOverride ?? fillImage.color;
+                c.a *= Mathf.Clamp01(alphaMultiplier);
+                fillImage.color = c;
+            }
+
+            if (backgroundImage != null && hasCachedBgColor)
+            {
+                Color bg = cachedBgColor;
+                bg.a *= Mathf.Lerp(0.35f, 1f, Mathf.Clamp01(alphaMultiplier));
+                backgroundImage.color = bg;
+            }
         }
 
         public void SetValueText(string text)
@@ -50,7 +92,7 @@ namespace PacificRimUI
             if (Mathf.Abs(currentRatio - targetRatio) > 0.0005f)
             {
                 currentRatio = Mathf.Lerp(currentRatio, targetRatio, Mathf.Clamp01(Time.unscaledDeltaTime * 14f));
-                ApplyRatio(currentRatio);
+                ApplyRatio(isGlitching ? Mathf.Clamp01(currentRatio + glitchRatioOffset) : currentRatio);
             }
         }
 
